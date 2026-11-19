@@ -589,7 +589,7 @@ export async function executeTool(
             },
             lesson,
           };
-        } catch (err: any) {
+        } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           if (message.includes('conflicts with an existing lesson')) {
             return errorResult(
@@ -650,8 +650,9 @@ export async function executeTool(
             },
             lesson,
           };
-        } catch (err: any) {
-          return errorResult(toolCall, `Cancellation failed: ${err.message || String(err)}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return errorResult(toolCall, `Cancellation failed: ${message}`);
         }
       }
 
@@ -719,8 +720,9 @@ export async function executeTool(
             },
             lesson: newLesson,
           };
-        } catch (err: any) {
-          return errorResult(toolCall, `Reschedule failed: ${err.message || String(err)}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return errorResult(toolCall, `Reschedule failed: ${message}`);
         }
       }
 
@@ -773,9 +775,10 @@ export async function executeTool(
       default:
         return errorResult(toolCall, `Unknown tool: ${toolCall.name}`);
     }
-  } catch (err: any) {
+  } catch (err) {
     console.error(`[driving agent] tool execution error (${toolCall.name}):`, err);
-    return errorResult(toolCall, `Error executing ${toolCall.name}: ${err.message || String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    return errorResult(toolCall, `Error executing ${toolCall.name}: ${message}`);
   }
 }
 

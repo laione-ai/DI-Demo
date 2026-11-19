@@ -205,6 +205,9 @@ export interface Lesson {
   reminders?: LessonReminder[];
 }
 
+/** A lesson loaded with its learner joined (needed to message the learner). */
+export type LessonWithLearner = Lesson & { learner: Learner };
+
 // -------------------------------------------------------
 // Reminder
 // -------------------------------------------------------

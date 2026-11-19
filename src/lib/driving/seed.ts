@@ -66,7 +66,7 @@ export async function seedDrivingSchoolData(
     },
   ];
 
-  const insertedInstructors: any[] = [];
+  const insertedInstructors: { id: string }[] = [];
   for (const inst of instructorsData) {
     const { data } = await db
       .from('instructors')
@@ -129,7 +129,7 @@ export async function seedDrivingSchoolData(
     },
   ];
 
-  const insertedLearners: any[] = [];
+  const insertedLearners: { id: string }[] = [];
   for (const lrn of learnersData) {
     const { data } = await db
       .from('learners')

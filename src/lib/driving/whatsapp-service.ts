@@ -6,9 +6,13 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Lesson, DrivingSchoolConfig, LessonReminder } from './types';
+import type { LessonWithLearner, DrivingSchoolConfig, LessonReminder } from './types';
 import { DRIVING_BUTTON_IDS } from './types';
 import { formatInSchoolTimezone } from './config';
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 export interface DrivingWhatsAppService {
   sendInteractiveButtons(params: {
@@ -92,9 +96,9 @@ export class RealWhatsAppService implements DrivingWhatsAppService {
       });
 
       return { success: true, messageId: result.whatsappMessageId };
-    } catch (err: any) {
+    } catch (err) {
       console.error('[driving] sendInteractiveButtons error:', err);
-      return { success: false, error: err.message || 'Send error' };
+      return { success: false, error: errorMessage(err, 'Send error') };
     }
   }
 
@@ -112,9 +116,9 @@ export class RealWhatsAppService implements DrivingWhatsAppService {
       });
 
       return { success: true, messageId: result.whatsappMessageId };
-    } catch (err: any) {
+    } catch (err) {
       console.error('[driving] sendTextMessage error:', err);
-      return { success: false, error: err.message || 'Send error' };
+      return { success: false, error: errorMessage(err, 'Send error') };
     }
   }
 
@@ -141,9 +145,9 @@ export class RealWhatsAppService implements DrivingWhatsAppService {
       });
 
       return { success: true };
-    } catch (err: any) {
+    } catch (err) {
       console.error('[driving] sendReaction error:', err);
-      return { success: false, error: err.message || 'Reaction error' };
+      return { success: false, error: errorMessage(err, 'Reaction error') };
     }
   }
 }
@@ -161,7 +165,7 @@ export function createWhatsAppService(
 export async function sendLessonReminder(
   db: SupabaseClient,
   waService: DrivingWhatsAppService,
-  lesson: Lesson & { learner: any; instructor: any },
+  lesson: LessonWithLearner,
   reminder: LessonReminder,
   config: DrivingSchoolConfig,
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {

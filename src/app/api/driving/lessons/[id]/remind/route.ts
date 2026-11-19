@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getLesson } from '@/lib/driving/lesson-service';
 import { loadSchoolConfig } from '@/lib/driving/config';
+import type { LessonWithLearner } from '@/lib/driving/types';
 import { createWhatsAppService, sendLessonReminder } from '@/lib/driving/whatsapp-service';
 
 export async function POST(
@@ -23,6 +24,9 @@ export async function POST(
 
   const lesson = await getLesson(supabase, profile.account_id, id);
   if (!lesson) return NextResponse.json({ error: 'Lesson not found' }, { status: 404 });
+  if (!lesson.learner) {
+    return NextResponse.json({ error: 'Lesson has no learner' }, { status: 422 });
+  }
 
   const config = await loadSchoolConfig(supabase, profile.account_id, user.id);
   const waService = createWhatsAppService(supabase, config.demo_mode);
@@ -45,7 +49,7 @@ export async function POST(
   const res = await sendLessonReminder(
     supabase,
     waService,
-    lesson as any,
+    lesson as LessonWithLearner,
     syntheticReminder,
     config,
   );

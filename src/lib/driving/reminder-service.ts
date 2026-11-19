@@ -8,6 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   Lesson,
+  LessonWithLearner,
   DrivingSchoolConfig,
   LessonReminder,
   ReminderType,
@@ -133,7 +134,7 @@ export async function processDueReminders(
   let failed = 0;
 
   for (const reminder of dueReminders) {
-    const lesson = reminder.lesson as (Lesson & { learner: any; instructor: any });
+    const lesson = reminder.lesson as LessonWithLearner;
     if (!lesson || !lesson.learner) continue;
 
     // Skip if lesson is cancelled or completed

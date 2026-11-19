@@ -41,7 +41,7 @@ describe('Driving Agent Tools', () => {
           }
           return {};
         }),
-      } as any;
+      } as unknown as ToolExecutionContext['db'];
 
       const mockCtx: ToolExecutionContext = {
         db: mockDb,
@@ -113,7 +113,7 @@ describe('Driving Agent Tools', () => {
           }
           return {};
         }),
-      } as any;
+      } as unknown as ToolExecutionContext['db'];
 
       const mockCtx: ToolExecutionContext = {
         db: mockDb,
@@ -186,7 +186,7 @@ describe('Driving Agent Tools', () => {
           }
           return {};
         }),
-      } as any;
+      } as unknown as ToolExecutionContext['db'];
 
       const mockCtx: ToolExecutionContext = {
         db: mockDb,
