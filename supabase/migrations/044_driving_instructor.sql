@@ -17,6 +17,9 @@
 -- Preserves RLS, constraints, indexes and existing data.
 -- ============================================================
 
+-- Ensure pending_approval exists in the enum
+ALTER TYPE dental_appointment_status ADD VALUE IF NOT EXISTS 'pending_approval';
+
 -- 1. Rename tables
 ALTER TABLE IF EXISTS dental_clinic_config RENAME TO driving_school_config;
 ALTER TABLE IF EXISTS dental_doctors RENAME TO instructors;
@@ -134,7 +137,7 @@ ALTER TABLE lessons
 ALTER TABLE lessons DROP CONSTRAINT IF EXISTS dental_appointments_status_check;
 ALTER TABLE lessons DROP CONSTRAINT IF EXISTS lessons_status_check;
 ALTER TABLE lessons ADD CONSTRAINT lessons_status_check CHECK (
-  status IN ('scheduled', 'reminder_sent', 'confirmed', 'cancelled', 'reschedule_requested', 'rescheduled', 'completed', 'no_show', 'pending_approval')
+  status::text IN ('scheduled', 'reminder_sent', 'confirmed', 'cancelled', 'reschedule_requested', 'rescheduled', 'completed', 'no_show', 'pending_approval')
 );
 
 -- Update exclusion constraint on lessons

@@ -1,6 +1,6 @@
-﻿-- ============================================================
+-- ============================================================
 -- LessonDesk Driving School: Complete Combined Schema Migration
--- Migrations 001 through 044 (Generated 2026-11-19 11:26:47)
+-- Migrations 001 through 044 (Generated 2026-11-19 12:15:59)
 -- ============================================================
 
 
@@ -432,7 +432,9 @@ BEGIN
 END $$;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 001_initial_schema.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -475,7 +477,9 @@ ALTER TABLE deals
   ADD CONSTRAINT deals_status_check CHECK (status IN ('open', 'won', 'lost'));
 
 
+-- ------------------------------------------------------------
 -- <<< End: 002_pipelines_enhancements.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -568,7 +572,9 @@ AFTER INSERT OR UPDATE OR DELETE ON broadcast_recipients
 FOR EACH ROW EXECUTE FUNCTION public.broadcast_recipient_aggregate_trigger();
 
 
+-- ------------------------------------------------------------
 -- <<< End: 003_broadcast_recipient_wamid.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -642,7 +648,9 @@ ALTER TABLE deals
     ON DELETE SET NULL;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 004_contact_delete_set_null.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -780,7 +788,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 005_broadcast_counts_incremental.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -929,7 +939,9 @@ ALTER TABLE automation_pending_executions ENABLE ROW LEVEL SECURITY;
 -- access is server-side via the service-role key.
 
 
+-- ------------------------------------------------------------
 -- <<< End: 006_automations.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -973,7 +985,9 @@ REVOKE ALL ON FUNCTION increment_automation_execution_count(UUID) FROM authentic
 GRANT EXECUTE ON FUNCTION increment_automation_execution_count(UUID) TO service_role;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 007_automations_increment_counter.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -1041,7 +1055,9 @@ CREATE POLICY "Users can delete their own avatar"
   );
 
 
+-- ------------------------------------------------------------
 -- <<< End: 008_profile_avatars_storage.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -1164,7 +1180,9 @@ BEGIN
 END $$;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 009_message_actions.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -1453,7 +1471,9 @@ BEGIN
 END $$;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 010_flows.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -1502,7 +1522,9 @@ ALTER TABLE profiles
 -- rarely written.
 
 
+-- ------------------------------------------------------------
 -- <<< End: 011_profile_beta_features.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -1547,7 +1569,9 @@ REVOKE ALL ON FUNCTION increment_flow_execution_count(UUID) FROM authenticated;
 GRANT EXECUTE ON FUNCTION increment_flow_execution_count(UUID) TO service_role;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 012_flows_increment_counter.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -1640,7 +1664,9 @@ BEGIN
 END $$;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 013_whatsapp_config_phone_number_id_unique.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -1847,7 +1873,9 @@ CREATE INDEX IF NOT EXISTS idx_message_templates_meta_template_id
   WHERE meta_template_id IS NOT NULL;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 014_message_templates_meta_integration.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -1901,7 +1929,9 @@ CREATE INDEX IF NOT EXISTS idx_whatsapp_config_registered_at
   WHERE registered_at IS NULL;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 015_whatsapp_config_registration.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -2024,7 +2054,9 @@ CREATE POLICY "Users can delete their own flow media"
   );
 
 
+-- ------------------------------------------------------------
 -- <<< End: 016_flow_media.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -2722,7 +2754,9 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 
+-- ------------------------------------------------------------
 -- <<< End: 017_account_sharing.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3014,7 +3048,9 @@ REVOKE ALL ON FUNCTION public.transfer_account_ownership(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.transfer_account_ownership(UUID) TO authenticated;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 018_account_member_rpcs.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3260,7 +3296,9 @@ REVOKE ALL ON FUNCTION public.redeem_invitation(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.redeem_invitation(TEXT) TO authenticated;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 019_invitation_rpcs.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3391,7 +3429,9 @@ CREATE POLICY "Members can delete flow media"
 -- conventions without modification.
 
 
+-- ------------------------------------------------------------
 -- <<< End: 020_account_sharing_followups.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3432,7 +3472,9 @@ ALTER TABLE accounts
   CHECK (default_currency ~ '^[A-Z]{3}$');
 
 
+-- ------------------------------------------------------------
 -- <<< End: 021_account_default_currency.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3561,7 +3603,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_account_phone_normalized
   WHERE phone_normalized <> '';
 
 
+-- ------------------------------------------------------------
 -- <<< End: 022_contact_phone_dedup.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3692,7 +3736,9 @@ CREATE POLICY "Members can delete chat media"
   );
 
 
+-- ------------------------------------------------------------
 -- <<< End: 023_chat_media.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3802,7 +3848,9 @@ BEGIN
 END $$;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 024_member_presence.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3886,7 +3934,9 @@ REVOKE ALL ON FUNCTION public.filter_contacts_by_tags(UUID[], TEXT, INT, INT) FR
 GRANT EXECUTE ON FUNCTION public.filter_contacts_by_tags(UUID[], TEXT, INT, INT) TO authenticated;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 025_filter_contacts_by_tags.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -3979,7 +4029,9 @@ CREATE POLICY api_keys_delete ON api_keys FOR DELETE
   USING (is_account_member(account_id, 'admin'));
 
 
+-- ------------------------------------------------------------
 -- <<< End: 026_api_keys.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -4119,7 +4171,9 @@ BEGIN
 END $$;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 027_notifications.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -4231,7 +4285,9 @@ RETURNS void AS $$
 $$ LANGUAGE sql SECURITY DEFINER SET search_path = public;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 028_webhook_endpoints.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -4381,7 +4437,9 @@ $$ LANGUAGE sql SECURITY DEFINER SET search_path = public;
 GRANT EXECUTE ON FUNCTION public.claim_ai_reply_slot(uuid, integer) TO service_role;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 029_ai_reply.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -4594,7 +4652,9 @@ REVOKE ALL ON FUNCTION public.match_ai_knowledge_semantic(uuid, text, integer) F
 GRANT EXECUTE ON FUNCTION public.match_ai_knowledge_semantic(uuid, text, integer) TO authenticated, service_role;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 030_ai_knowledge.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -4630,7 +4690,9 @@ GRANT EXECUTE ON FUNCTION public.match_ai_knowledge_semantic(uuid, text, integer
 GRANT EXECUTE ON FUNCTION public.claim_ai_reply_slot(uuid, integer) TO service_role;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 031_ai_reply_slot_grant.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -4739,7 +4801,9 @@ GRANT EXECUTE ON FUNCTION public.match_ai_knowledge_semantic(uuid, text, integer
 -- ============================================================
 
 
+-- ------------------------------------------------------------
 -- <<< End: 032_fix_ai_knowledge_membership.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -4834,7 +4898,9 @@ CREATE POLICY ai_usage_log_select ON ai_usage_log FOR SELECT
 -- is never mutated from the client.
 
 
+-- ------------------------------------------------------------
 -- <<< End: 033_ai_reply_polish.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -4940,7 +5006,9 @@ CREATE TRIGGER enforce_profile_privilege_columns
 -- ============================================================
 
 
+-- ------------------------------------------------------------
 -- <<< End: 034_fix_profiles_update_rls.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -5010,7 +5078,9 @@ CREATE TRIGGER set_updated_at BEFORE UPDATE ON quick_replies
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 
+-- ------------------------------------------------------------
 -- <<< End: 035_interactive_messages.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -5145,7 +5215,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_account_contact
   ON conversations (account_id, contact_id);
 
 
+-- ------------------------------------------------------------
 -- <<< End: 036_conversation_contact_dedup.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -5218,7 +5290,9 @@ GRANT SELECT (
 -- anon gets nothing back.
 
 
+-- ------------------------------------------------------------
 -- <<< End: 037_whatsapp_config_app_secret.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -5745,7 +5819,9 @@ CREATE INDEX IF NOT EXISTS idx_dental_message_log_appointment
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 040_dental_clinic.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -5885,7 +5961,9 @@ CREATE INDEX IF NOT EXISTS idx_dental_agent_sessions_expires
   WHERE completed_at IS NULL;
 
 
+-- ------------------------------------------------------------
 -- <<< End: 041_dental_agent.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -5912,7 +5990,9 @@ COMMENT ON COLUMN dental_patients.name_confirmed IS
   'auto-pulled from their WhatsApp profile and never verified.';
 
 
+-- ------------------------------------------------------------
 -- <<< End: 042_dental_patient_name_confirmed.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -5985,7 +6065,9 @@ SET
 -- or 'authenticated' roles on this bucket.
 
 
+-- ------------------------------------------------------------
 -- <<< End: 043_inbound_media.sql
+-- ------------------------------------------------------------
 
 
 -- ------------------------------------------------------------
@@ -6010,6 +6092,9 @@ SET
 --
 -- Preserves RLS, constraints, indexes and existing data.
 -- ============================================================
+
+-- Ensure pending_approval exists in the enum
+ALTER TYPE dental_appointment_status ADD VALUE IF NOT EXISTS 'pending_approval';
 
 -- 1. Rename tables
 ALTER TABLE IF EXISTS dental_clinic_config RENAME TO driving_school_config;
@@ -6128,7 +6213,7 @@ ALTER TABLE lessons
 ALTER TABLE lessons DROP CONSTRAINT IF EXISTS dental_appointments_status_check;
 ALTER TABLE lessons DROP CONSTRAINT IF EXISTS lessons_status_check;
 ALTER TABLE lessons ADD CONSTRAINT lessons_status_check CHECK (
-  status IN ('scheduled', 'reminder_sent', 'confirmed', 'cancelled', 'reschedule_requested', 'rescheduled', 'completed', 'no_show', 'pending_approval')
+  status::text IN ('scheduled', 'reminder_sent', 'confirmed', 'cancelled', 'reschedule_requested', 'rescheduled', 'completed', 'no_show', 'pending_approval')
 );
 
 -- Update exclusion constraint on lessons
@@ -6255,5 +6340,7 @@ CREATE POLICY "Members can manage driving agent sessions" ON driving_agent_sessi
   FOR ALL USING (account_id IN (SELECT account_id FROM profiles WHERE user_id = auth.uid()));
 
 
+-- ------------------------------------------------------------
 -- <<< End: 044_driving_instructor.sql
+-- ------------------------------------------------------------
 
