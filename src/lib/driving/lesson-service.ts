@@ -309,12 +309,21 @@ export async function autoCompleteLessons(db: SupabaseClient): Promise<number> {
       .eq('id', lesson.id);
 
     // Increment learner's lessons_completed counter
-    await db.rpc('increment_learner_lessons', { learner_id: lesson.learner_id }).catch(() => {
-      // Fallback to manual update
-      db.from('learners')
-        .update({ lessons_completed: (lesson as any).lessons_completed + 1 })
-        .eq('id', lesson.learner_id);
+    const { error: rpcError } = await db.rpc('increment_learner_lessons', {
+      learner_id: lesson.learner_id,
     });
+    if (rpcError) {
+      // Fallback to a manual read-then-update (the RPC may not exist).
+      const { data: learner } = await db
+        .from('learners')
+        .select('lessons_completed')
+        .eq('id', lesson.learner_id)
+        .maybeSingle();
+      await db
+        .from('learners')
+        .update({ lessons_completed: (learner?.lessons_completed ?? 0) + 1 })
+        .eq('id', lesson.learner_id);
+    }
 
     updatedCount++;
   }

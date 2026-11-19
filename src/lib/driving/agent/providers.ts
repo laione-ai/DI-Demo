@@ -90,11 +90,11 @@ export async function generateWithToolsOpenAi(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
-    throw toNetworkError(err, 'OpenAI');
+    throw toNetworkError(err);
   }
 
   if (!res.ok) {
-    throw await providerHttpError(res, 'OpenAI');
+    throw await providerHttpError('OpenAI', res);
   }
 
   const data = await res.json();
@@ -203,11 +203,11 @@ export async function generateWithToolsAnthropic(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
-    throw toNetworkError(err, 'Anthropic');
+    throw toNetworkError(err);
   }
 
   if (!res.ok) {
-    throw await providerHttpError(res, 'Anthropic');
+    throw await providerHttpError('Anthropic', res);
   }
 
   const data = await res.json();

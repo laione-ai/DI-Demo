@@ -78,7 +78,7 @@ export async function seedDrivingSchoolData(
 
   // 3. Insert Learners (UK numbers & profiles)
   // Include one learner with < 5 lessons (Ahmed) and one with >= 5 lessons (Chloe) to test eligibility
-  const learnersData = [
+  const learnersData: Record<string, unknown>[] = [
     {
       account_id: accountId,
       user_id: userId,

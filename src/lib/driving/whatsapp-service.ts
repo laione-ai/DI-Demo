@@ -72,31 +72,26 @@ export class RealWhatsAppService implements DrivingWhatsAppService {
     footerText?: string;
   }) {
     try {
-      const { resolveConversation } = await import('@/lib/whatsapp/resolve-conversation');
-      const { sendMessage } = await import('@/lib/whatsapp/send-message');
+      const { resolveConversationByPhone } = await import('@/lib/whatsapp/resolve-conversation');
+      const { sendMessageToConversation } = await import('@/lib/whatsapp/send-message');
 
-      const conv = await resolveConversation(this.db, params.accountId, params.phone);
-      if (!conv) return { success: false, error: 'Could not resolve conversation' };
+      // Throws SendMessageError on a bad phone / missing WhatsApp config.
+      const resolved = await resolveConversationByPhone(this.db, params.accountId, params.phone);
 
-      const result = await sendMessage({
-        conversationId: conv.id,
-        content: params.bodyText,
-        type: 'interactive',
-        interactive: {
-          type: 'button',
-          header: params.headerText ? { type: 'text', text: params.headerText } : undefined,
-          body: { text: params.bodyText },
-          footer: params.footerText ? { text: params.footerText } : undefined,
-          action: {
-            buttons: params.buttons.map((b) => ({
-              type: 'reply' as const,
-              reply: { id: b.id, title: b.title },
-            })),
-          },
+      const result = await sendMessageToConversation(this.db, params.accountId, {
+        conversationId: resolved.conversationId,
+        messageType: 'interactive',
+        contentText: params.bodyText,
+        interactivePayload: {
+          kind: 'buttons',
+          body: params.bodyText,
+          header: params.headerText,
+          footer: params.footerText,
+          buttons: params.buttons.map((b) => ({ id: b.id, title: b.title })),
         },
       });
 
-      return { success: true, messageId: result?.id };
+      return { success: true, messageId: result.whatsappMessageId };
     } catch (err: any) {
       console.error('[driving] sendInteractiveButtons error:', err);
       return { success: false, error: err.message || 'Send error' };
@@ -105,19 +100,18 @@ export class RealWhatsAppService implements DrivingWhatsAppService {
 
   async sendTextMessage(params: { accountId: string; phone: string; text: string }) {
     try {
-      const { resolveConversation } = await import('@/lib/whatsapp/resolve-conversation');
-      const { sendMessage } = await import('@/lib/whatsapp/send-message');
+      const { resolveConversationByPhone } = await import('@/lib/whatsapp/resolve-conversation');
+      const { sendMessageToConversation } = await import('@/lib/whatsapp/send-message');
 
-      const conv = await resolveConversation(this.db, params.accountId, params.phone);
-      if (!conv) return { success: false, error: 'Could not resolve conversation' };
+      const resolved = await resolveConversationByPhone(this.db, params.accountId, params.phone);
 
-      const result = await sendMessage({
-        conversationId: conv.id,
-        content: params.text,
-        type: 'text',
+      const result = await sendMessageToConversation(this.db, params.accountId, {
+        conversationId: resolved.conversationId,
+        messageType: 'text',
+        contentText: params.text,
       });
 
-      return { success: true, messageId: result?.id };
+      return { success: true, messageId: result.whatsappMessageId };
     } catch (err: any) {
       console.error('[driving] sendTextMessage error:', err);
       return { success: false, error: err.message || 'Send error' };
@@ -126,22 +120,23 @@ export class RealWhatsAppService implements DrivingWhatsAppService {
 
   async sendReaction(params: { accountId: string; phone: string; targetMessageId: string; emoji: string }) {
     try {
-      const { sendReaction: metaReaction } = await import('@/lib/whatsapp/meta-api');
+      const { sendReactionMessage } = await import('@/lib/whatsapp/meta-api');
+      const { decrypt } = await import('@/lib/whatsapp/encryption');
+      const { sanitizePhoneForMeta } = await import('@/lib/whatsapp/phone-utils');
+
       const { data: config } = await this.db
         .from('whatsapp_config')
-        .select('*')
+        .select('phone_number_id, access_token')
         .eq('account_id', params.accountId)
         .maybeSingle();
 
       if (!config) return { success: false, error: 'No WhatsApp config' };
-      const { decrypt } = await import('@/lib/whatsapp/encryption');
-      const token = decrypt(config.access_token);
 
-      await metaReaction({
+      await sendReactionMessage({
         phoneNumberId: config.phone_number_id,
-        accessToken: token,
-        recipientPhone: params.phone,
-        messageId: params.targetMessageId,
+        accessToken: decrypt(config.access_token),
+        to: sanitizePhoneForMeta(params.phone),
+        targetMessageId: params.targetMessageId,
         emoji: params.emoji,
       });
 
