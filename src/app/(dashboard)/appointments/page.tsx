@@ -361,6 +361,8 @@ export default function LessonsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [seeding, setSeeding] = useState(false)
+  const [agentEnabled, setAgentEnabled] = useState(false)
+  const [togglingAgent, setTogglingAgent] = useState(false)
 
   const [stats, setStats] = useState({
     total: 0,
@@ -408,10 +410,44 @@ export default function LessonsPage() {
     }
   }, [])
 
+  const loadConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/driving/config')
+      if (res.ok) {
+        const data = await res.json()
+        setAgentEnabled(data.agent_enabled ?? false)
+      }
+    } catch (err) {
+      console.error('Failed to load driving config:', err)
+    }
+  }, [])
+
+  const toggleAgent = async () => {
+    setTogglingAgent(true)
+    try {
+      const nextState = !agentEnabled
+      const res = await fetch('/api/driving/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_enabled: nextState }),
+      })
+      if (res.ok) {
+        setAgentEnabled(nextState)
+      } else {
+        alert('Failed to update agent status')
+      }
+    } catch {
+      alert('Failed to update agent status')
+    } finally {
+      setTogglingAgent(false)
+    }
+  }
+
   useEffect(() => {
     loadLessons()
     loadStats()
-  }, [loadLessons, loadStats])
+    loadConfig()
+  }, [loadLessons, loadStats, loadConfig])
 
   const handleSeed = async () => {
     setSeeding(true)
@@ -491,7 +527,25 @@ export default function LessonsPage() {
             Manage driving lessons, instructors & learner bookings
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleAgent}
+            disabled={togglingAgent}
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              agentEnabled
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                : 'border-border bg-card text-muted-foreground hover:bg-muted'
+            }`}
+            title="Click to toggle the WhatsApp AI booking agent"
+          >
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                agentEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-muted-foreground/40'
+              }`}
+            />
+            {agentEnabled ? 'AI Agent: Active' : 'AI Agent: Inactive'}
+          </button>
           {stats.total === 0 && (
             <button
               onClick={handleSeed}
