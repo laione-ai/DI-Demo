@@ -19,6 +19,26 @@ import {
 
 const ANTHROPIC_VERSION = '2023-06-01';
 
+const DEFAULT_OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
+
+/**
+ * Resolve the chat-completions URL from OPENAI_BASE_URL.
+ *
+ * The rest of the codebase (src/lib/ai/providers/openai.ts, the dental agent,
+ * docs/phase-1/P1-8-openrouter.md) treats OPENAI_BASE_URL as the FULL endpoint,
+ * e.g. https://openrouter.ai/api/v1/chat/completions. This adapter used to append
+ * "/chat/completions" unconditionally, which produced a doubled path and a 404
+ * whenever the variable was set as documented. Accept both forms: a full
+ * endpoint is used as-is, a bare base (…/v1) gets the path appended.
+ */
+export function resolveOpenAiChatUrl(
+  base: string | undefined = process.env.OPENAI_BASE_URL,
+): string {
+  const trimmed = (base ?? '').trim().replace(/\/+$/, '');
+  if (!trimmed) return DEFAULT_OPENAI_CHAT_URL;
+  return trimmed.endsWith('/chat/completions') ? trimmed : `${trimmed}/chat/completions`;
+}
+
 /**
  * Call OpenAI (or an OpenAI-compatible endpoint) with tool calling.
  */
@@ -27,7 +47,7 @@ export async function generateWithToolsOpenAi(
 ): Promise<ToolCallingResult> {
   const { apiKey, model, messages, tools, timeoutMs } = args;
 
-  const url = `${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`;
+  const url = resolveOpenAiChatUrl();
 
   const openAiMessages = messages.map((m) => {
     if (m.role === 'tool') {
