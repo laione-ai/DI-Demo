@@ -27,6 +27,7 @@ import {
 } from '../availability-service';
 import { commitReschedule } from '../reschedule';
 import { formatInSchoolTimezone, getDateInTimezone } from '../config';
+import { REQUIRED_LESSONS_FOR_TEST, isTestBooking, wantsHuman } from './guards';
 
 // -------------------------------------------------------
 // Tool definitions (JSON Schemas for the LLM)
@@ -129,7 +130,7 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
   {
     name: 'check_test_eligibility',
     description:
-      'Check if the learner has completed the minimum requirement of 5 lessons before being eligible to book a driving test or mock test.',
+      'Look up the learner in the database and check whether they have completed at least 5 driving LESSONS (completed tests do not count) before they can book a driving test or mock test. Call this whenever the learner asks about a driving test or mock test.',
     parameters: {
       type: 'object',
       properties: {},
@@ -139,7 +140,7 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
   {
     name: 'create_booking',
     description:
-      'Book a driving lesson. If booking a driving mock test (lesson_type: mock_test), the system automatically validates that the learner has completed at least 5 lessons.',
+      "Book a driving LESSON (standard, intensive, refresher, first_lesson) or a driving TEST / mock test (lesson_type: mock_test). A test is NOT a lesson: for any driving test or mock test you MUST use lesson_type 'mock_test', and the system will refuse it unless the learner has completed at least 5 driving lessons.",
     parameters: {
       type: 'object',
       properties: {
@@ -204,7 +205,7 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
   {
     name: 'transfer_to_human',
     description:
-      'Hand this conversation over to a human instructor or school manager. Use when requested or when an issue cannot be resolved by the agent.',
+      "Hand this conversation over to a human. ONLY use when the learner has explicitly asked to speak to a person, raised a formal complaint, or reported a safety issue. Never use it because the chat is long, you are unsure, no slots were found, or a tool failed — keep helping instead. The system rejects hand-offs the learner did not ask for.",
     parameters: {
       type: 'object',
       properties: {
@@ -247,6 +248,8 @@ export interface ToolExecutionContext {
   conversationId: string;
   waMessageId: string;
   waService: DrivingWhatsAppService;
+  /** The learner's latest inbound message (used to validate hand-off requests). */
+  inboundText?: string;
 }
 
 // -------------------------------------------------------
@@ -491,7 +494,7 @@ export async function executeTool(
         }
 
         const counts = await countCompletedLessons(db, accountId, learnerId);
-        const REQUIRED_CLASSES = 5;
+        const REQUIRED_CLASSES = REQUIRED_LESSONS_FOR_TEST;
         const eligible = counts.totalCompleted >= REQUIRED_CLASSES;
 
         return {
@@ -502,9 +505,11 @@ export async function executeTool(
               eligible,
               completed_lessons: counts.totalCompleted,
               required_lessons: REQUIRED_CLASSES,
+              lessons_still_needed: Math.max(0, REQUIRED_CLASSES - counts.totalCompleted),
+              note: 'Counts completed driving lessons only; completed tests/mock tests are not lessons.',
               message: eligible
                 ? `Learner has completed ${counts.totalCompleted} lessons (minimum ${REQUIRED_CLASSES} required). Eligible to book a driving test/mock test!`
-                : `Learner has only completed ${counts.totalCompleted} lessons. School policy requires at least ${REQUIRED_CLASSES} completed lessons before a driving test or mock test can be booked.`,
+                : `Learner has only completed ${counts.totalCompleted} lessons. School policy requires at least ${REQUIRED_CLASSES} completed lessons before a driving test or mock test can be booked. Do NOT book the test; offer regular driving lessons instead.`,
             }),
           },
         };
@@ -526,13 +531,15 @@ export async function executeTool(
           return errorResult(toolCall, 'Cannot book: no learner record found.');
         }
 
-        // 5-lesson check for mock test
-        if (lessonType === 'mock_test') {
+        // 5-lesson check for any driving test / mock test. A test is not a lesson, and the
+        // gate must not depend on the model picking the right lesson_type, so notes that
+        // describe a driving/mock test are treated as a test booking too.
+        if (isTestBooking(lessonType, args.notes as string | undefined)) {
           const counts = await countCompletedLessons(db, accountId, learnerId);
-          if (counts.totalCompleted < 5) {
+          if (counts.totalCompleted < REQUIRED_LESSONS_FOR_TEST) {
             return errorResult(
               toolCall,
-              `Cannot book a driving test or mock test: Learner has completed ${counts.totalCompleted} lesson(s), but a minimum of 5 completed lessons is required. Please offer a standard lesson first.`,
+              `Cannot book a driving test or mock test: Learner has completed ${counts.totalCompleted} lesson(s), but a minimum of ${REQUIRED_LESSONS_FOR_TEST} completed lessons is required. Please offer a standard lesson first.`,
             );
           }
         }
@@ -731,6 +738,24 @@ export async function executeTool(
       // ====================================================
       case 'transfer_to_human': {
         const reason = (args.reason as string) ?? 'Learner requested human assistance';
+
+        // Only hand off when the learner actually asked for a person / complained.
+        // Otherwise the model must keep helping and follow the conversation script.
+        if (ctx.inboundText !== undefined && !wantsHuman(ctx.inboundText)) {
+          return {
+            result: {
+              tool_call_id: toolCall.id,
+              name: toolCall.name,
+              content: JSON.stringify({
+                success: false,
+                error:
+                  'Hand-off refused: the learner has not asked to speak to a person, complained, or reported a safety issue. ' +
+                  'Do NOT transfer. Continue helping and follow the conversation flow for the current step.',
+              }),
+            },
+          };
+        }
+
         return {
           result: {
             tool_call_id: toolCall.id,

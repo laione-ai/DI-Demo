@@ -11,7 +11,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Lesson, DrivingSchoolConfig } from '../types';
+import type { Lesson, Learner, AgentSession, DrivingSchoolConfig } from '../types';
 import type {
   AgentContext,
   AgentTurnResult,
@@ -22,6 +22,8 @@ import { aiRequestTimeoutMs } from '@/lib/ai/defaults';
 import { generateWithTools } from './providers';
 import { DRIVING_TOOLS, executeTool, type ToolExecutionContext } from './tools';
 import { buildDrivingAgentPrompt } from './prompt';
+import { getIntakeProgress, isPlaceholderName } from './intake-flow';
+import { mentionsDrivingTest } from './guards';
 import {
   loadActiveSession,
   createSession,
@@ -35,7 +37,48 @@ import { formatCalendarLinksForWhatsApp } from '../calendar';
 import { createWhatsAppService } from '../whatsapp-service';
 import { countCompletedLessons } from '../lesson-service';
 
-const MAX_ROUNDS = 6;
+/** Max LLM <-> tool rounds in one turn (parallel tool calls share a round). */
+const MAX_ROUNDS = 10;
+
+/** Hand off to a human only after this many failed turns IN A ROW (one blip is not a reason). */
+const MAX_CONSECUTIVE_FAILURES = 3;
+
+const SOFT_RETRY_TEXT =
+  "Sorry, I had a little hiccup on my side 🙈 Could you send that again in a moment?";
+
+const TECHNICAL_HANDOFF_TEXT =
+  "I'm experiencing a technical issue, so I'm going to connect you with your instructor who will be in touch shortly 🚗";
+
+const FORCE_TEXT_INSTRUCTION =
+  '\n\nFINAL INSTRUCTION: Reply to the learner NOW with a short, friendly WhatsApp message in plain text, ' +
+  'using only the information you already have. Do not call any tools. Stay on the conversation script.';
+
+/** Call the LLM, retrying once on a transient failure (timeout, 429, 5xx). */
+async function generateWithRetry(
+  provider: 'openai' | 'anthropic',
+  args: Parameters<typeof generateWithTools>[1],
+) {
+  try {
+    return await generateWithTools(provider, args);
+  } catch (err) {
+    console.warn('[driving agent] LLM call failed, retrying once:', err);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return generateWithTools(provider, args);
+  }
+}
+
+/**
+ * Clean stored history before sending it to the model. Empty messages make
+ * Anthropic reject the whole request (400), and a conversation must start with
+ * a user turn.
+ */
+function sanitizeHistory(
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const cleaned = messages.filter((m) => m.content && m.content.trim());
+  while (cleaned.length > 0 && cleaned[0].role !== 'user') cleaned.shift();
+  return cleaned;
+}
 
 /**
  * Run one agent turn for an inbound WhatsApp message.
@@ -63,8 +106,6 @@ export async function runAgentTurn(
     .eq('account_id', accountId)
     .eq('is_active', true)
     .order('full_name');
-
-  let isNewlyAutoRegistered = false;
 
   const learner = await (async () => {
     const { data: existing } = await db
@@ -102,22 +143,10 @@ export async function runAgentTurn(
       return null;
     }
 
-    isNewlyAutoRegistered = true;
     return created;
   })();
 
   const learnerId = learner?.id ?? null;
-  const learnerName = learner?.full_name ?? undefined;
-
-  const nameIsPlaceholder = learnerName
-    ? /^\+?[\d\s\-()]+$/.test(learnerName.trim())
-    : false;
-
-  const nameIsUnconfirmed =
-    !nameIsPlaceholder &&
-    learnerName &&
-    (isNewlyAutoRegistered || (learner && !learner.name_confirmed));
-
   // Count completed lessons for 5-lesson test eligibility
   let completedLessonsCount = 0;
   if (learnerId) {
@@ -163,22 +192,33 @@ export async function runAgentTurn(
   }
 
   // 4. Build prompt
-  const systemPrompt = buildDrivingAgentPrompt({
-    config,
-    learnerLessons,
-    instructors: instructors ?? [],
-    learner,
-    learnerName,
-    nameIsPlaceholder,
-    nameIsUnconfirmed: !!nameIsUnconfirmed,
-    completedLessonsCount,
-  });
+  const activeSession: AgentSession = session;
+  const testRequestDetected = mentionsDrivingTest(inboundText);
+
+  // Built from a learner snapshot so it can be rebuilt mid-turn, right after the
+  // model saves new details — that is what moves the script on to the next step.
+  const promptFor = (current: Learner | null): string => {
+    const currentName = current?.full_name ?? undefined;
+    const placeholder = currentName ? isPlaceholderName(currentName) : false;
+    return buildDrivingAgentPrompt({
+      config,
+      learnerLessons,
+      instructors: instructors ?? [],
+      learner: current,
+      learnerName: currentName,
+      nameIsPlaceholder: placeholder,
+      nameIsUnconfirmed: !placeholder && !!currentName && !current?.name_confirmed,
+      completedLessonsCount,
+      intake: getIntakeProgress(current, activeSession.turn_count),
+      testRequestDetected,
+    });
+  };
 
   const llmMessages: ToolCallingMessage[] = [
-    { role: 'system', content: systemPrompt },
+    { role: 'system', content: promptFor(learner as Learner | null) },
   ];
 
-  for (const msg of session.messages) {
+  for (const msg of sanitizeHistory(session.messages)) {
     llmMessages.push({ role: msg.role, content: msg.content });
   }
 
@@ -196,6 +236,7 @@ export async function runAgentTurn(
   let handedOff = false;
   let handoffReason: string | undefined;
   let lastMutationLesson: Lesson | undefined;
+  let llmFailed = false;
 
   const waService = createWhatsAppService(db, config.demo_mode);
 
@@ -209,19 +250,23 @@ export async function runAgentTurn(
     conversationId,
     waMessageId,
     waService,
+    inboundText,
   };
+
+  const callLlm = (messages: ToolCallingMessage[]) =>
+    generateWithRetry(aiConfig.provider, {
+      apiKey: aiConfig.apiKey,
+      model: aiConfig.model,
+      messages,
+      tools: DRIVING_TOOLS,
+      timeoutMs,
+    });
 
   try {
     while (rounds < MAX_ROUNDS) {
       rounds++;
 
-      const result = await generateWithTools(aiConfig.provider, {
-        apiKey: aiConfig.apiKey,
-        model: aiConfig.model,
-        messages: llmMessages,
-        tools: DRIVING_TOOLS,
-        timeoutMs,
-      });
+      const result = await callLlm(llmMessages);
 
       if (process.env.DRIVING_AGENT_DEBUG === 'true') {
         console.log(`[driving agent][debug] round ${rounds}`, result);
@@ -238,6 +283,8 @@ export async function runAgentTurn(
         tool_calls: result.toolCalls,
       });
 
+      let profileChanged = false;
+
       for (const toolCall of result.toolCalls) {
         const { result: toolResult, handoff, handoffReason: reason, lesson } =
           await executeTool(toolCall, toolCtx);
@@ -249,6 +296,10 @@ export async function runAgentTurn(
 
         if (lesson) {
           lastMutationLesson = lesson;
+        }
+
+        if (toolCall.name === 'update_learner_profile') {
+          profileChanged = true;
         }
 
         llmMessages.push({
@@ -263,22 +314,68 @@ export async function runAgentTurn(
         finalText = result.text || '';
         break;
       }
+
+      // The learner's profile changed, so the script has moved on: rebuild the
+      // prompt so the model sees the NEW current step on its next round.
+      if (profileChanged && learnerId) {
+        const { data: fresh } = await db
+          .from('learners')
+          .select('*')
+          .eq('id', learnerId)
+          .maybeSingle();
+        if (fresh) {
+          llmMessages[0] = { role: 'system', content: promptFor(fresh as Learner) };
+        }
+      }
     }
 
-    if (rounds >= MAX_ROUNDS && !finalText) {
-      handedOff = true;
-      finalText =
-        "I'm having a little trouble completing your request. Let me connect you directly with your instructor or our team to help.";
+    // Out of rounds, or the model returned nothing: ask once more for a plain-text
+    // reply rather than handing the conversation to a human.
+    if (!handedOff && !finalText.trim()) {
+      console.warn(`[driving agent] no reply after ${rounds} round(s); forcing a text reply`);
+      const forcedMessages = [...llmMessages];
+      forcedMessages[0] = {
+        role: 'system',
+        content: (forcedMessages[0].content ?? '') + FORCE_TEXT_INSTRUCTION,
+      };
+      const forced = await callLlm(forcedMessages);
+      finalText = forced.text;
     }
   } catch (err) {
     console.error('[driving agent] LLM error:', err);
-    handedOff = true;
-    finalText =
-      "I'm experiencing a quick technical hitch. Let me connect you with your instructor who will be in touch shortly.";
+    llmFailed = true;
+  }
+
+  // A turn that produced no usable reply is a "failed turn". One blip must not
+  // permanently switch the bot off for this chat: apologise, keep the session
+  // exactly as it was so the learner can just retry, and only hand off after
+  // several failures in a row.
+  const priorFailures = activeSession.slots?.llm_failures ?? 0;
+  const failedTurn = !handedOff && (llmFailed || !finalText.trim());
+
+  if (failedTurn) {
+    const failures = priorFailures + 1;
+    if (failures >= MAX_CONSECUTIVE_FAILURES) {
+      handedOff = true;
+      handoffReason = `AI could not produce a reply ${failures} times in a row (technical issue)`;
+      finalText = TECHNICAL_HANDOFF_TEXT;
+    } else {
+      finalText = SOFT_RETRY_TEXT;
+    }
   }
 
   // 6. Handle handoff
+  if (handedOff && !finalText.trim()) {
+    finalText =
+      "No problem at all — I'm passing you over to your instructor / our team now, and they'll be in touch shortly 😊";
+  }
+
   if (handedOff) {
+    console.warn('[driving agent] handing off to a human', {
+      reason: handoffReason,
+      turn: session.turn_count,
+      rounds,
+    });
     await performHandoff(
       db,
       conversationId,
@@ -289,6 +386,13 @@ export async function runAgentTurn(
       handoffReason,
     );
     await completeSession(db, session.id, 'handed_off');
+  }
+
+  if (failedTurn && !handedOff) {
+    await updateSession(db, activeSession.id, {
+      slots: { ...activeSession.slots, llm_failures: priorFailures + 1 },
+    });
+    return { consumed: true, reply: finalText, handedOff: false };
   }
 
   // 7. Compose deterministic confirmation if mutation occurred
@@ -312,6 +416,9 @@ export async function runAgentTurn(
       messages: assistantMessages,
       turn_count: session.turn_count + 1,
       last_message_id: waMessageId,
+      ...(priorFailures > 0
+        ? { slots: { ...activeSession.slots, llm_failures: 0 } }
+        : {}),
       state: lastMutationLesson
         ? 'completed'
         : session.state === 'awaiting_intent'

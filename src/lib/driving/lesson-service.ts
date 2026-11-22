@@ -176,13 +176,16 @@ export async function countCompletedLessons(
 
   const baseCompleted = learner?.lessons_completed || 0;
 
-  // 2. Query completed lessons in the database
+  // 2. Query completed LESSONS in the database. Driving tests / mock tests are a
+  //    different thing from driving lessons, so they never count towards the
+  //    "5 lessons before a test" requirement.
   const { count: completedInDb } = await db
     .from('lessons')
     .select('*', { count: 'exact', head: true })
     .eq('learner_id', learnerId)
     .eq('account_id', accountId)
-    .eq('status', 'completed');
+    .eq('status', 'completed')
+    .or('lesson_type.is.null,lesson_type.neq.mock_test');
 
   const inDb = completedInDb || 0;
   const totalCompleted = Math.max(baseCompleted, inDb);
@@ -297,7 +300,7 @@ export async function autoCompleteLessons(db: SupabaseClient): Promise<number> {
   // 1. Confirmed lessons that have ended -> 'completed'
   const { data: pastConfirmed } = await db
     .from('lessons')
-    .select('id, learner_id, account_id')
+    .select('id, learner_id, account_id, lesson_type')
     .in('status', ['confirmed'])
     .lt('ends_at', now);
 
@@ -308,7 +311,12 @@ export async function autoCompleteLessons(db: SupabaseClient): Promise<number> {
       .update({ status: 'completed', completed_at: now })
       .eq('id', lesson.id);
 
-    // Increment learner's lessons_completed counter
+    // Increment learner's lessons_completed counter (lessons only — a completed
+    // mock test is not a lesson and must not count towards the 5-lesson rule).
+    if (lesson.lesson_type === 'mock_test') {
+      updatedCount++;
+      continue;
+    }
     const { error: rpcError } = await db.rpc('increment_learner_lessons', {
       learner_id: lesson.learner_id,
     });

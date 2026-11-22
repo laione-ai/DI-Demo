@@ -386,6 +386,8 @@ export interface AgentSessionSlots {
   preferred_times?: string[];
   lesson_id?: string;
   offered_options?: Array<{ id: string; label: string; value: string }>;
+  /** Consecutive AI/LLM failures in this session (resets on success). */
+  llm_failures?: number;
   candidate_starts_at?: string;
   new_instructor_id?: string;
   learner_details?: {

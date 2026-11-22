@@ -13,11 +13,15 @@ import type {
   AgentSessionSlots,
 } from '../types';
 
-/** Session timeout in milliseconds (30 minutes). */
-const SESSION_TIMEOUT_MS = 30 * 60_000;
+/**
+ * Session timeout in milliseconds (24 hours). WhatsApp learners often reply hours
+ * later; a short timeout silently starts a brand-new session mid-intake, so the
+ * agent loses the conversation and restarts the script.
+ */
+const SESSION_TIMEOUT_MS = 24 * 60 * 60_000;
 
-/** Maximum number of LLM conversation turns stored per session. */
-const MAX_SESSION_MESSAGES = 20;
+/** Maximum number of LLM conversation messages stored per session. */
+const MAX_SESSION_MESSAGES = 40;
 
 /**
  * Load the active (non-completed, non-expired) session for a phone+account.

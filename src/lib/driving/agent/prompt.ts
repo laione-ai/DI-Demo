@@ -9,6 +9,8 @@
 
 import type { DrivingSchoolConfig, Lesson, Instructor, Learner } from '../types';
 import { formatInSchoolTimezone } from '../config';
+import { REQUIRED_LESSONS_FOR_TEST } from './guards';
+import { formatIntakeSection, type IntakeProgress } from './intake-flow';
 
 interface PromptContext {
   config: DrivingSchoolConfig;
@@ -19,6 +21,10 @@ interface PromptContext {
   nameIsPlaceholder?: boolean;
   nameIsUnconfirmed?: boolean;
   completedLessonsCount?: number;
+  /** Where the learner is in the intake script (from the database + reply count). */
+  intake?: IntakeProgress;
+  /** True when the learner's latest message is about a driving test / mock test. */
+  testRequestDetected?: boolean;
 }
 
 /**
@@ -34,6 +40,8 @@ export function buildDrivingAgentPrompt(ctx: PromptContext): string {
     nameIsPlaceholder,
     nameIsUnconfirmed,
     completedLessonsCount = 0,
+    intake,
+    testRequestDetected = false,
   } = ctx;
   const parts: string[] = [];
 
@@ -157,21 +165,42 @@ export function buildDrivingAgentPrompt(ctx: PromptContext): string {
     `Once they reply, call \`update_learner_profile\` again with transmission, goal, and frequency. Say:\n` +
     `"That's great. I've got all your details.\n\nLet me check the instructor's availability for you.\n\nAre there any particular days or times that work best? For example, weekday evenings, weekends or mornings?"\n\n` +
     `Step 6: Slot Proposal\n` +
-    `When they provide their preferred times (e.g. "Weekday evenings, preferably Friday"), call \`get_instructor_availability\` or confirm you will check Friday evenings and offer the best open slots!`
+    `When they provide their preferred times (e.g. "Weekday evenings, preferably Friday"), call \`update_learner_profile\` with preferred_days and preferred_times, then call \`list_instructors\` and \`get_instructor_availability\` and offer the best REAL open slots (never invent slots).`
   );
 
+  if (intake) {
+    parts.push(formatIntakeSection(intake));
+  }
+
   // -------------------------------------------------------
-  // 6. CRITICAL RULE: MINIMUM 5 LESSONS FOR DRIVING TEST BOOKING
+  // 6. CRITICAL RULE: DRIVING TEST vs DRIVING LESSONS + 5-LESSON MINIMUM
   // -------------------------------------------------------
+  const eligible = completedLessonsCount >= REQUIRED_LESSONS_FOR_TEST;
+  const stillNeeded = Math.max(0, REQUIRED_LESSONS_FOR_TEST - completedLessonsCount);
+
+  parts.push(
+    `DRIVING TEST vs DRIVING LESSONS — these are different things, never confuse them:\n` +
+    `- A driving LESSON is practice with an instructor (lesson_type: standard, intensive, refresher or first_lesson). Anyone can book lessons.\n` +
+    `- A driving TEST or MOCK TEST (lesson_type: 'mock_test') is an assessment of driving ability. It is booked separately and is restricted.\n` +
+    `- Completed tests never count as lessons. Only completed driving lessons count towards the ${REQUIRED_LESSONS_FOR_TEST}-lesson minimum.\n` +
+    `- "I want driving lessons" / "I want to pass my test" (a goal) is NOT a request to book a test. Treat it as a lesson enquiry and follow the intake flow.\n` +
+    `- Only treat it as a test booking when the learner actually asks to book/arrange a driving test or mock test.`
+  );
+
   parts.push(
     `CRITICAL MANDATORY RULE — 5-LESSON MINIMUM FOR TEST BOOKING:\n` +
-    `Anyone attempting to book a driving test or a mock driving test ('mock_test') MUST have completed a minimum of 5 lessons with the school.\n` +
-    `1. Whenever a learner asks to book a driving test or mock test, you MUST call \`check_test_eligibility\` first.\n` +
-    `2. If \`check_test_eligibility\` returns that they have completed FEWER than 5 lessons (e.g., eligible: false):\n` +
-    `   - You MUST politely refuse to book the test/mock test.\n` +
-    `   - Clearly explain: "Our policy requires learners to have completed at least 5 lessons with an instructor before booking a driving test or mock test. Currently, you have completed ${completedLessonsCount} lessons."\n` +
-    `   - Offer to book regular driving lessons or a confidence-building package first to help them reach the 5-lesson requirement.\n` +
-    `3. If they have completed 5 or more lessons, you may proceed to check availability and book the mock test.`
+    `Anyone attempting to book a driving test or a mock driving test ('mock_test') MUST have completed a minimum of ${REQUIRED_LESSONS_FOR_TEST} driving lessons with the school (checked against the database).\n` +
+    `DATABASE STATUS FOR THIS LEARNER: ${completedLessonsCount} completed lesson(s) on file — ${eligible ? 'ELIGIBLE to book a driving test / mock test' : `NOT ELIGIBLE (needs ${stillNeeded} more)`}.\n` +
+    `1. Whenever a learner asks to book a driving test or mock test, you MUST call \`check_test_eligibility\` first. The database is the only source of truth — never rely on what the learner tells you about how many lessons they have had.\n` +
+    `2. If \`check_test_eligibility\` returns that they have completed FEWER than ${REQUIRED_LESSONS_FOR_TEST} lessons (eligible: false):\n` +
+    `   - You MUST politely refuse to book the test/mock test and you MUST NOT call \`create_booking\` for it.\n` +
+    `   - Clearly explain: "Our policy requires learners to have completed at least ${REQUIRED_LESSONS_FOR_TEST} lessons with an instructor before booking a driving test or mock test. Currently, you have completed ${completedLessonsCount} lessons."\n` +
+    `   - Offer to book regular driving lessons or a confidence-building package first to help them reach the ${REQUIRED_LESSONS_FOR_TEST}-lesson requirement.\n` +
+    `   - This is a normal part of the conversation: do NOT transfer to a human because of it.\n` +
+    `3. If they have completed ${REQUIRED_LESSONS_FOR_TEST} or more lessons, you may proceed to check availability and book the test with lesson_type 'mock_test'.` +
+    (testRequestDetected
+      ? `\n>>> THE LEARNER'S LATEST MESSAGE IS ABOUT A DRIVING TEST / MOCK TEST. Database result: ${completedLessonsCount} of ${REQUIRED_LESSONS_FOR_TEST} required lessons completed → ${eligible ? 'they MAY proceed to booking' : 'you MUST decline the test booking now and offer lessons instead'}.`
+      : '')
   );
 
   // -------------------------------------------------------
@@ -185,7 +214,7 @@ export function buildDrivingAgentPrompt(ctx: PromptContext): string {
     `- Call \`check_test_eligibility\` whenever a learner mentions booking a driving test or mock test.\n` +
     `- Call \`create_booking\` ONLY after the learner explicitly confirms their chosen slot time and instructor.\n` +
     `- Call \`get_my_lessons\` to view existing bookings before cancelling or rescheduling.\n` +
-    `- Call \`transfer_to_human\` if the learner insists on speaking with an instructor directly, makes a formal complaint, or if you encounter an unsolvable issue.`
+    `- Call \`transfer_to_human\` ONLY if the learner explicitly asks to speak to a person, makes a formal complaint, or reports a safety issue. NEVER hand off because the conversation is long, you are unsure what to say, no slots were found, a tool returned an error, or the learner asked for a test they are not yet eligible for. In all those cases keep helping and stay on the script. Hand-offs the learner did not ask for are rejected by the system.`
   );
 
   // -------------------------------------------------------

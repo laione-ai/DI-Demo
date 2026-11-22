@@ -2,6 +2,26 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DRIVING_TOOLS, executeTool, type ToolExecutionContext } from '../tools';
 import type { DrivingSchoolConfig, Instructor, Learner } from '../../types';
 
+/**
+ * Chainable query-builder mock: every method (select/eq/or/...) returns the same
+ * object, and awaiting it resolves to `result`. Keeps tests independent of the
+ * exact filters the service chains onto a query.
+ */
+function chain(result: Record<string, unknown>): unknown {
+  const proxy: object = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === 'then') {
+          return (resolve: (value: unknown) => void) => resolve(result);
+        }
+        return () => proxy;
+      },
+    },
+  );
+  return proxy;
+}
+
 describe('Driving Agent Tools', () => {
   it('registers all required driving tools', () => {
     const toolNames = DRIVING_TOOLS.map((t) => t.name);
@@ -32,12 +52,7 @@ describe('Driving Agent Tools', () => {
             };
           }
           if (table === 'lessons') {
-            return {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockReturnThis(),
-              // 0 completed lessons in DB
-              count: 0,
-            };
+            return chain({ count: 0 });
           }
           return {};
         }),
@@ -105,11 +120,7 @@ describe('Driving Agent Tools', () => {
             };
           }
           if (table === 'lessons') {
-            return {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockReturnThis(),
-              count: 6,
-            };
+            return chain({ count: 6 });
           }
           return {};
         }),
@@ -178,11 +189,7 @@ describe('Driving Agent Tools', () => {
             };
           }
           if (table === 'lessons') {
-            return {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockReturnThis(),
-              count: 2,
-            };
+            return chain({ count: 2 });
           }
           return {};
         }),
