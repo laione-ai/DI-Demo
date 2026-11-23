@@ -87,20 +87,30 @@ describe('buildDrivingAgentPrompt', () => {
     expect(prompt).toContain('at least 5 lessons');
   });
 
-  it('includes the new client enquiry intake flow matching demo prompt', () => {
+  it('tells the model to text like a person, one question per message', () => {
     const prompt = buildDrivingAgentPrompt({
       config: mockConfig,
       learnerLessons: [],
       instructors: mockInstructors,
     });
 
-    expect(prompt).toContain('TYPICAL CONVERSATION FLOW — NEW CLIENT ENQUIRY');
-    expect(prompt).toContain('Is this your first time having driving lessons');
-    expect(prompt).toContain('what language would you prefer to communicate in');
-    expect(prompt).toContain('Full name');
-    expect(prompt).toContain('Postcode or area where you live');
-    expect(prompt).toContain('valid provisional or full driving licence');
-    expect(prompt).toContain('manual or automatic');
-    expect(prompt).toContain('particular goal');
+    expect(prompt).toContain('ONE question per message');
+    expect(prompt).toContain('no bullet points');
+    expect(prompt).toContain('NEW CLIENT ENQUIRY');
+    // the old fill-in-the-form template must be gone
+    expect(prompt).not.toContain('Could you tell me your:');
+    // honest if sincerely asked
+    expect(prompt).toContain("you're the school's AI assistant");
+  });
+
+  it('writes in the learner\'s chosen language once they have told us', () => {
+    const learner = { preferred_language: 'Polish', language_confirmed: true } as unknown as Learner;
+    const prompt = buildDrivingAgentPrompt({
+      config: mockConfig,
+      learnerLessons: [],
+      instructors: mockInstructors,
+      learner,
+    });
+    expect(prompt).toContain('Write every message in Polish');
   });
 });

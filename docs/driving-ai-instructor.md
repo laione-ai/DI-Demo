@@ -8,79 +8,36 @@ LessonDesk is a conversational WhatsApp AI booking agent specifically built for 
 
 ## Typical Client Conversation Flow
 
-The AI agent follows this friendly, structured conversation flow for new client enquiries:
+The agent texts like a person on the team: short messages, **one question per message**, no lists or bold, at most one emoji. It works through the intake one question at a time and skips anything already on file:
 
 ```
-Student:
-Hi, I'm looking for driving lessons. Can you give me some information?
-
-AI Agent:
-Hey! Thanks for getting in touch 😊
-
-I'd be happy to help you arrange your driving lessons.
-
-Just a couple of quick questions so I can understand what you're looking for.
-
-Is this your first time having driving lessons, or have you had lessons with another instructor before?
-
-Student:
-I've had a few lessons before, but I haven't driven for about six months.
-
-AI Agent:
-No problem at all! We can definitely help you get back into driving.
-
-Before we go any further, what language would you prefer to communicate in? English, or another language?
-
-Student:
-English is fine.
-
-AI Agent:
-Perfect!
-
-I'll just need to collect a few details from you before we discuss available lessons.
-
-Could you tell me your:
-
-Full name
-
-Age
-
-Postcode or area where you live
-
-Whether you have a valid provisional or full driving licence
-
-Your previous driving experience
-
-Student:
-My name is Ahmed. I'm 24, live in Ealing, and I have a provisional licence. I've had around 5 lessons before.
-
-AI Agent:
-Thanks, Ahmed!
-
-Just a couple more things:
-
-Are you looking to have manual or automatic driving lessons?
-
-Do you have a particular goal? For example, are you preparing for your driving test, or just looking to build your confidence?
-
-How many lessons would you ideally like per week?
-
-Student:
-Manual. I want to pass my test and probably two lessons a week.
-
-AI Agent:
-That's great. I've got all your details.
-
-Let me check the instructor's availability for you.
-
-Are there any particular days or times that work best? For example, weekday evenings, weekends or mornings?
-
-Student:
-Weekday evenings would be best, preferably Friday.
-
-AI Agent:
-Of course! I'll check whether Friday evenings are available and get back to you shortly.
+Learner:  Hi, I'm looking for driving lessons. Can you give me some information?
+Agent:    Hey, thanks for getting in touch! Have you had any lessons before, or would this be your first time?
+Learner:  I've had a few, but I haven't driven for about six months.
+Agent:    No problem, we can get you back into it. Are you happy chatting in English?
+Learner:  English is fine.
+Agent:    Perfect. What's your full name?
+Learner:  Ahmed Khan
+Agent:    Thanks Ahmed. How old are you?
+Learner:  24
+Agent:    And whereabouts are you based? Postcode or area is fine.
+...       (licence → manual/automatic → goal → lessons per week → days/times)
+Learner:  Weekday evenings, preferably Friday.
+Agent:    Kevin's free Friday at 3 or 4pm, or Thursday at 6pm. Would any of those work?
 ```
+
+How it is enforced:
+
+| Piece | File | What it does |
+|---|---|---|
+| Question queue | `agent/intake-flow.ts` | Works out the single next question from the learner row; skips a question after it has been asked twice in a session (no loops) |
+| Texting style | `agent/prompt.ts` | Tells the model how a person texts: one question, short, plain, honest if sincerely asked whether it's a bot |
+| Style guard | `agent/style.ts` | Runs on every reply: drops anything after the first question, strips markdown |
+| Language | `agent/prompt.ts`, migration `045` | Once the learner picks a language (`language_confirmed`), every reply is written in it |
+
+## Demo instructor (Kevin)
+
+`supabase/seed/kevin_demo_instructor.sql` adds a test instructor, Kevin (manual + automatic, ADI-verified, all London), with 2 weeks of availability starting the day you run it: two days off, a short Saturday, afternoon-only and morning-only days, lunch breaks, a 3-hour block, and three already-booked evening slots. Run it in the Supabase SQL editor; it is safe to re-run and rebuilds from today each time. The agent's `get_instructor_availability` now defaults to the same 2-week window starting today.
 
 ---
 
@@ -117,7 +74,7 @@ Anyone attempting to book a **driving test** or **mock driving test** (`mock_tes
 | `src/lib/driving/agent/engine.ts` | Core agent tool-calling loop with deterministic confirmations |
 | `src/lib/driving/agent/tools.ts` | 10 driving tools including `check_test_eligibility` and `update_learner_profile` |
 | `src/lib/driving/agent/prompt.ts` | Multi-step system prompt builder matching the enquiry flow |
-| `src/lib/driving/agent/session.ts` | 30-minute sliding session management in `driving_agent_sessions` |
+| `src/lib/driving/agent/session.ts` | 24-hour sliding session management in `driving_agent_sessions` |
 | `src/lib/driving/agent/providers.ts` | Provider-agnostic tool calling (OpenAI + Anthropic) |
 | `src/app/api/driving/*` | REST API routes for config, instructors, learners, lessons, cron, seed |
 | `src/app/(dashboard)/appointments/page.tsx` | Dashboard UI for viewing driving lessons and instructor schedule |

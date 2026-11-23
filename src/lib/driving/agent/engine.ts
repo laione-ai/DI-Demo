@@ -22,7 +22,8 @@ import { aiRequestTimeoutMs } from '@/lib/ai/defaults';
 import { generateWithTools } from './providers';
 import { DRIVING_TOOLS, executeTool, type ToolExecutionContext } from './tools';
 import { buildDrivingAgentPrompt } from './prompt';
-import { getIntakeProgress, isPlaceholderName } from './intake-flow';
+import { getIntakeProgress, isPlaceholderName, type IntakeAskCounts } from './intake-flow';
+import { humanizeReply } from './style';
 import { mentionsDrivingTest } from './guards';
 import {
   loadActiveSession,
@@ -51,7 +52,7 @@ const TECHNICAL_HANDOFF_TEXT =
 
 const FORCE_TEXT_INSTRUCTION =
   '\n\nFINAL INSTRUCTION: Reply to the learner NOW with a short, friendly WhatsApp message in plain text, ' +
-  'using only the information you already have. Do not call any tools. Stay on the conversation script.';
+  'using only the information you already have. Ask at most one question. Do not call any tools.';
 
 /** Call the LLM, retrying once on a transient failure (timeout, 429, 5xx). */
 async function generateWithRetry(
@@ -194,6 +195,9 @@ export async function runAgentTurn(
   // 4. Build prompt
   const activeSession: AgentSession = session;
   const testRequestDetected = mentionsDrivingTest(inboundText);
+  const askedSoFar: IntakeAskCounts = (activeSession.slots?.intake_asked ?? {}) as IntakeAskCounts;
+  // Latest known learner row; refreshed whenever the model saves new details.
+  let currentLearner = learner as Learner | null;
 
   // Built from a learner snapshot so it can be rebuilt mid-turn, right after the
   // model saves new details — that is what moves the script on to the next step.
@@ -209,7 +213,7 @@ export async function runAgentTurn(
       nameIsPlaceholder: placeholder,
       nameIsUnconfirmed: !placeholder && !!currentName && !current?.name_confirmed,
       completedLessonsCount,
-      intake: getIntakeProgress(current, activeSession.turn_count),
+      intake: getIntakeProgress(current, activeSession.turn_count, askedSoFar),
       testRequestDetected,
     });
   };
@@ -324,7 +328,8 @@ export async function runAgentTurn(
           .eq('id', learnerId)
           .maybeSingle();
         if (fresh) {
-          llmMessages[0] = { role: 'system', content: promptFor(fresh as Learner) };
+          currentLearner = fresh as Learner;
+          llmMessages[0] = { role: 'system', content: promptFor(currentLearner) };
         }
       }
     }
@@ -395,13 +400,15 @@ export async function runAgentTurn(
     return { consumed: true, reply: finalText, handedOff: false };
   }
 
-  // 7. Compose deterministic confirmation if mutation occurred
-  let replyText = finalText;
+  // 7. Make the model's text read like a person texting: one question max,
+  //    no markdown. Then add the deterministic confirmation if a booking changed.
+  let replyText = humanizeReply(finalText);
+  const modelText = replyText;
 
   if (lastMutationLesson && !handedOff) {
     const confirmation = composeDeterministicConfirmation(lastMutationLesson, config);
     if (confirmation) {
-      replyText = finalText ? `${finalText}\n\n${confirmation}` : confirmation;
+      replyText = modelText ? `${modelText}\n\n${confirmation}` : confirmation;
     }
   }
 
@@ -412,13 +419,19 @@ export async function runAgentTurn(
   ];
 
   if (!handedOff) {
+    // Remember which intake question this reply asked, so a question the
+    // learner keeps dodging is dropped after MAX_ASKS instead of looping.
+    const askedNow = getIntakeProgress(currentLearner, session.turn_count, askedSoFar).next;
+    const intakeAsked: IntakeAskCounts =
+      askedNow && !lastMutationLesson
+        ? { ...askedSoFar, [askedNow.key]: (askedSoFar[askedNow.key] ?? 0) + 1 }
+        : askedSoFar;
+
     await updateSession(db, session.id, {
       messages: assistantMessages,
       turn_count: session.turn_count + 1,
       last_message_id: waMessageId,
-      ...(priorFailures > 0
-        ? { slots: { ...activeSession.slots, llm_failures: 0 } }
-        : {}),
+      slots: { ...activeSession.slots, llm_failures: 0, intake_asked: intakeAsked },
       state: lastMutationLesson
         ? 'completed'
         : session.state === 'awaiting_intent'
@@ -458,24 +471,21 @@ function composeDeterministicConfirmation(
     hour12: false,
   });
   const instructorName = lesson.instructor?.full_name ?? 'your instructor';
-  const lessonType = lesson.lesson_type === 'mock_test' ? 'Driving Mock Test' : 'Driving Lesson';
+  const what = lesson.lesson_type === 'mock_test' ? 'mock test' : 'lesson';
+  const mins = lesson.duration_minutes || 60;
 
   switch (lesson.status) {
     case 'scheduled':
     case 'confirmed': {
       const calendarLinks = formatCalendarLinksForWhatsApp(lesson, config);
       return (
-        `✅ ${lessonType} Confirmed!\n\n` +
-        `📅 Date: ${dateStr}\n` +
-        `🕐 Time: ${timeStr}\n` +
-        `🚗 Instructor: ${instructorName}\n` +
-        `⏱️ Duration: ${lesson.duration_minutes || 60} mins\n\n` +
+        `Your ${what} with ${instructorName} is booked for ${dateStr} at ${timeStr} (${mins} mins) ✅\n\n` +
         `${calendarLinks}`
       );
     }
 
     case 'cancelled':
-      return `❌ Your driving lesson on ${dateStr} at ${timeStr} with ${instructorName} has been cancelled.`;
+      return `Your ${what} with ${instructorName} on ${dateStr} at ${timeStr} is now cancelled.`;
 
     default:
       return null;

@@ -1,6 +1,6 @@
 -- ============================================================
 -- LessonDesk Driving School: Complete Combined Schema Migration
--- Migrations 001 through 044 (Generated 2026-11-19 12:15:59)
+-- Migrations 001 through 045 (Generated 2026-11-23 16:36:54)
 -- ============================================================
 
 
@@ -6342,5 +6342,36 @@ CREATE POLICY "Members can manage driving agent sessions" ON driving_agent_sessi
 
 -- ------------------------------------------------------------
 -- <<< End: 044_driving_instructor.sql
+-- ------------------------------------------------------------
+
+
+-- ------------------------------------------------------------
+-- >>> Start: 045_learner_language_confirmed.sql
+-- ------------------------------------------------------------
+
+-- ============================================================
+-- Migration 045: learners.language_confirmed
+--
+-- The driving agent now asks one intake question per message and
+-- works out the next question from what is on file. `preferred_language`
+-- defaults to 'en', so "never asked" and "asked, said English" look the
+-- same. This flag records that the learner actually answered.
+--
+-- Safe to re-run.
+-- ============================================================
+
+ALTER TABLE learners
+  ADD COLUMN IF NOT EXISTS language_confirmed boolean NOT NULL DEFAULT false;
+
+-- Anyone who already picked a non-default language has clearly answered.
+UPDATE learners
+SET language_confirmed = true
+WHERE language_confirmed = false
+  AND preferred_language IS NOT NULL
+  AND lower(preferred_language) NOT IN ('en', '');
+
+
+-- ------------------------------------------------------------
+-- <<< End: 045_learner_language_confirmed.sql
 -- ------------------------------------------------------------
 

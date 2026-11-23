@@ -29,6 +29,9 @@ import { commitReschedule } from '../reschedule';
 import { formatInSchoolTimezone, getDateInTimezone } from '../config';
 import { REQUIRED_LESSONS_FOR_TEST, isTestBooking, wantsHuman } from './guards';
 
+/** Default availability window offered to learners: 2 weeks, starting today. */
+export const AVAILABILITY_WINDOW_DAYS = 14;
+
 // -------------------------------------------------------
 // Tool definitions (JSON Schemas for the LLM)
 // -------------------------------------------------------
@@ -47,7 +50,7 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
   {
     name: 'get_instructor_availability',
     description:
-      'Get available driving lesson slots for a specific instructor on upcoming dates. Always call this to check real availability before offering times to the learner.',
+      'Get available driving lesson slots for a specific instructor. Defaults to the next 2 weeks starting today. Always call this to check real availability before offering times to the learner.',
     parameters: {
       type: 'object',
       properties: {
@@ -57,11 +60,11 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
         },
         from_date: {
           type: 'string',
-          description: 'Start date YYYY-MM-DD (optional, defaults to tomorrow)',
+          description: 'Start date YYYY-MM-DD (optional, defaults to today)',
         },
         to_date: {
           type: 'string',
-          description: 'End date YYYY-MM-DD (optional, defaults to 7 days from from_date)',
+          description: 'End date YYYY-MM-DD (optional, defaults to 13 days after from_date, i.e. a 2-week window)',
         },
       },
       required: ['instructor_id'],
@@ -121,7 +124,7 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
         },
         preferred_language: {
           type: 'string',
-          description: 'Preferred language of communication',
+          description: 'Language they want to chat in, e.g. "English", "Polish", "Urdu"',
         },
       },
       required: [],
@@ -333,14 +336,12 @@ export async function executeTool(
           return errorResult(toolCall, 'instructor_id is required');
         }
 
-        const today = new Date();
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-
-        const fromDate = (args.from_date as string) ?? getDateInTimezone(tomorrow, tz);
-        const toDateDefault = new Date(new Date(fromDate + 'T00:00:00Z'));
-        toDateDefault.setDate(toDateDefault.getDate() + 6);
-        const toDate = (args.to_date as string) ?? getDateInTimezone(toDateDefault, tz);
+        // Default window: the next 2 weeks starting today (school timezone).
+        // Slots earlier than "now" are dropped by the availability engine.
+        const fromDate = (args.from_date as string) || getDateInTimezone(new Date(), tz);
+        const toDateDefault = new Date(fromDate + 'T00:00:00Z');
+        toDateDefault.setUTCDate(toDateDefault.getUTCDate() + AVAILABILITY_WINDOW_DAYS - 1);
+        const toDate = (args.to_date as string) || toDateDefault.toISOString().slice(0, 10);
 
         const availability = await getAvailableSlots(
           db,
@@ -447,7 +448,10 @@ export async function executeTool(
         if (args.preferred_days) updates.preferred_days = args.preferred_days;
         if (args.preferred_times) updates.preferred_times = args.preferred_times;
         if (args.lessons_per_week) updates.lessons_per_week = args.lessons_per_week;
-        if (args.preferred_language) updates.preferred_language = args.preferred_language;
+        if (args.preferred_language) {
+          updates.preferred_language = (args.preferred_language as string).trim();
+          updates.language_confirmed = true;
+        }
 
         const { error: updateErr } = await db
           .from('learners')

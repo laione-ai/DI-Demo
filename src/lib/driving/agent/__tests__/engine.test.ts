@@ -143,7 +143,8 @@ const toolCall = (name: string, args: Record<string, unknown>, id = 'call_1'): T
 });
 
 const system = (m: ToolCallingMessage[]) => m[0].content ?? '';
-const stepOf = (m: ToolCallingMessage[]) => Number(/CURRENT STEP: Step (\d)/.exec(system(m))?.[1] ?? 0);
+const questionOf = (m: ToolCallingMessage[]) =>
+  /CURRENT QUESTION: (Q\d+)/.exec(system(m))?.[1] ?? (system(m).includes('All intake details are on file') ? 'DONE' : '?');
 const last = (m: ToolCallingMessage[]) => m[m.length - 1];
 
 let n = 0;
@@ -159,13 +160,21 @@ beforeEach(() => {
 // The script, end to end
 // ---------------------------------------------------------------------------
 
-describe("runAgentTurn — the Ahmed script, 9 messages in a row", () => {
-  it('walks steps 1→6 in order, never repeats a step, and never hands off', async () => {
-    // A stand-in for the model that does exactly what the prompt's CURRENT STEP says.
+describe('runAgentTurn — the Ahmed script, one question per message', () => {
+  it('asks the intake questions one at a time, in order, never repeating, never handing off', async () => {
+    // A stand-in for the model: saves whatever the learner just answered, then
+    // replies with a marker for the question the prompt says is current.
     // (This tests the engine + prompt plumbing, not the real LLM.)
     const savedFor: Array<[string, Record<string, unknown>]> = [
-      ['My name is Ahmed', { full_name: 'Ahmed', age: 24, postcode: 'Ealing', licence_type: 'provisional', experience_level: 'around 5 lessons' }],
-      ['Manual', { transmission_preference: 'manual', goal: 'pass my test', lessons_per_week: 2 }],
+      ["I've had a few lessons", { experience_level: 'a few lessons, not driven for 6 months' }],
+      ['English is fine', { preferred_language: 'English' }],
+      ["It's Ahmed Khan", { full_name: 'Ahmed Khan' }],
+      ["I'm 24", { age: 24 }],
+      ['SW17', { postcode: 'SW17' }],
+      ['Provisional', { licence_type: 'provisional' }],
+      ['Manual', { transmission_preference: 'manual' }],
+      ['pass my test', { goal: 'pass my test' }],
+      ['Two a week', { lessons_per_week: 2 }],
       ['Weekday evenings', { preferred_days: ['friday'], preferred_times: ['evening'] }],
     ];
 
@@ -176,7 +185,7 @@ describe("runAgentTurn — the Ahmed script, 9 messages in a row", () => {
         const hit = savedFor.find(([needle]) => (tail.content ?? '').includes(needle));
         if (hit) return toolCall('update_learner_profile', hit[1]);
       }
-      return text(`REPLY_FOR_STEP_${stepOf(msgs)}`);
+      return text(`ASK_${questionOf(msgs)}`);
     });
 
     const db = makeDb(freshLearner());
@@ -185,12 +194,15 @@ describe("runAgentTurn — the Ahmed script, 9 messages in a row", () => {
       "Hi, I'm looking for driving lessons. Can you give me some information?",
       "I've had a few lessons before, but I haven't driven for about six months.",
       'English is fine.',
-      "My name is Ahmed. I'm 24, live in Ealing, and I have a provisional licence. I've had around 5 lessons before.",
-      'Manual. I want to pass my test and probably two lessons a week.',
+      "It's Ahmed Khan",
+      "I'm 24",
+      'SW17, Tooting',
+      'Provisional',
+      'Manual please',
+      'I want to pass my test',
+      'Two a week',
       'Weekday evenings would be best, preferably Friday.',
       'Friday at 6pm works for me',
-      'Yes please book it',
-      'Thanks!',
     ];
 
     const replies: string[] = [];
@@ -201,18 +213,41 @@ describe("runAgentTurn — the Ahmed script, 9 messages in a row", () => {
     }
 
     expect(replies).toEqual([
-      'REPLY_FOR_STEP_1', // welcome + first question
-      'REPLY_FOR_STEP_2', // language
-      'REPLY_FOR_STEP_3', // name/age/postcode/licence/experience
-      'REPLY_FOR_STEP_4', // manual/auto, goal, lessons per week
-      'REPLY_FOR_STEP_5', // days/times
-      'REPLY_FOR_STEP_6', // check availability + propose slots
-      'REPLY_FOR_STEP_6', // stays on step 6 — never re-asks intake
-      'REPLY_FOR_STEP_6',
-      'REPLY_FOR_STEP_6',
+      'ASK_Q1', // greeting + lessons before?
+      'ASK_Q2', // language
+      'ASK_Q3', // full name
+      'ASK_Q4', // age
+      'ASK_Q5', // postcode
+      'ASK_Q6', // licence
+      'ASK_Q7', // manual / automatic
+      'ASK_Q8', // goal
+      'ASK_Q9', // lessons per week
+      'ASK_Q10', // days / times
+      'ASK_DONE', // all on file → check availability, offer slots
+      'ASK_DONE', // stays there — never re-asks intake
     ]);
-    expect(h.session?.turn_count).toBe(9);
+    expect(h.session?.turn_count).toBe(12);
     expect(h.session?.completed_at).toBeNull();
+  });
+
+  it('strips extra questions the model bundles into one message', async () => {
+    h.generate.mockResolvedValue(
+      text('Great, thanks! Could you tell me your postcode? And a little about your driving experience?'),
+    );
+    const res = await runAgentTurn(makeDb(freshLearner()), ctx, 'Hi', nextId());
+    expect(res.reply).toBe('Great, thanks! Could you tell me your postcode?');
+  });
+
+  it('moves on after a question has been dodged twice instead of looping', async () => {
+    h.generate.mockImplementation(async (_p: string, args: { messages: ToolCallingMessage[] }) =>
+      text(`ASK_${questionOf(args.messages)}`),
+    );
+    const db = makeDb(freshLearner());
+    const replies: string[] = [];
+    for (const msg of ['Hi', 'hmm', 'not sure', 'ok']) {
+      replies.push((await runAgentTurn(db, ctx, msg, nextId())).reply ?? '');
+    }
+    expect(replies).toEqual(['ASK_Q1', 'ASK_Q1', 'ASK_Q2', 'ASK_Q2']);
   });
 });
 

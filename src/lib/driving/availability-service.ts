@@ -207,7 +207,8 @@ export async function getNextAvailableDates(
   const today = new Date();
   const maxDaysAhead = 30;
 
-  for (let i = 1; i <= maxDaysAhead && dates.length < count; i++) {
+  // Start from today (i = 0): slots already in the past are skipped by generateSlots.
+  for (let i = 0; i <= maxDaysAhead && dates.length < count; i++) {
     const d = new Date(today);
     d.setDate(d.getDate() + i);
     const dateStr = getDateInTimezone(d, timezone);

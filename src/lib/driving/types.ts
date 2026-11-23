@@ -136,6 +136,8 @@ export interface Learner {
   preferred_times: string[];
   lessons_per_week: number | null;
   preferred_language: string;
+  /** True once the learner has told us which language they want to chat in. */
+  language_confirmed: boolean;
   stop_status: boolean;
   booker_name: string | null;
   booker_phone: string | null;
@@ -388,6 +390,8 @@ export interface AgentSessionSlots {
   offered_options?: Array<{ id: string; label: string; value: string }>;
   /** Consecutive AI/LLM failures in this session (resets on success). */
   llm_failures?: number;
+  /** How many times each intake question has been asked in this session (loop guard). */
+  intake_asked?: Partial<Record<string, number>>;
   candidate_starts_at?: string;
   new_instructor_id?: string;
   learner_details?: {

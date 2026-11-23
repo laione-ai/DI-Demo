@@ -99,5 +99,5 @@ export function formatCalendarLinksForWhatsApp(
   config: DrivingSchoolConfig,
 ): string {
   const googleUrl = buildGoogleCalendarLink(lesson, config);
-  return `📅 Add to Google Calendar: ${googleUrl}`;
+  return `Add it to your calendar: ${googleUrl}`;
 }
