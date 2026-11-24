@@ -392,6 +392,8 @@ export interface AgentSessionSlots {
   llm_failures?: number;
   /** How many times each intake question has been asked in this session (loop guard). */
   intake_asked?: Partial<Record<string, number>>;
+  /** Availability the agent already looked up, keyed by instructor id (see agent/availability-memory.ts). */
+  looked_up?: Record<string, LookedUpAvailability>;
   candidate_starts_at?: string;
   new_instructor_id?: string;
   learner_details?: {
@@ -422,4 +424,12 @@ export interface AgentSession {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** A compact copy of one get_instructor_availability result, kept across turns. */
+export interface LookedUpAvailability {
+  instructor_id: string;
+  instructor_name: string;
+  checked_at: string;
+  days: Array<{ date: string; day_name: string; times: string[] }>;
 }

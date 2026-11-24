@@ -21,14 +21,13 @@ export function buildGoogleCalendarLink(
   const instructorName = lesson.instructor?.full_name ?? 'Instructor';
   const lessonType = lesson.lesson_type === 'mock_test' ? 'Driving Mock Test' : 'Driving Lesson';
   const title = encodeURIComponent(`${lessonType} with ${instructorName}`);
-  const details = encodeURIComponent(
-    `Driving lesson arranged with ${config.school_name}.\nInstructor: ${instructorName}\nType: ${lesson.lesson_type || 'Standard'}`,
-  );
   const location = encodeURIComponent(config.school_address || config.school_name);
 
   return (
     `https://calendar.google.com/calendar/render?action=TEMPLATE` +
-    `&text=${title}&dates=${startIso}/${endIso}&details=${details}&location=${location}`
+    // Kept short on purpose: the title already names the instructor, and a
+    // long encoded URL is ugly in WhatsApp and the inbox.
+    `&text=${title}&dates=${startIso}/${endIso}&location=${location}`
   );
 }
 

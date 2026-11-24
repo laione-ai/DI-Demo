@@ -1,6 +1,6 @@
 -- ============================================================
 -- LessonDesk Driving School: Complete Combined Schema Migration
--- Migrations 001 through 045 (Generated 2026-11-23 16:36:54)
+-- Migrations 001 through 045 (Generated 2026-11-24 16:47:51)
 -- ============================================================
 
 

@@ -177,7 +177,7 @@ function VideoContent({ message, t }: { message: Message; t: ReturnType<typeof u
         className="max-h-64 max-w-60 rounded-lg"
       />
       {message.content_text && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+        <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
           {message.content_text}
         </p>
       )}
@@ -197,7 +197,7 @@ function AudioContent({ message, t }: { message: Message; t: ReturnType<typeof u
         <MediaExpired label={t("audio")} t={t} />
         {/* Voice-note transcript (filled in by the webhook). */}
         {message.content_text && (
-          <p className="mt-1 whitespace-pre-wrap break-words text-xs italic opacity-80">
+          <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-xs italic opacity-80">
             {message.content_text}
           </p>
         )}
@@ -209,7 +209,7 @@ function AudioContent({ message, t }: { message: Message; t: ReturnType<typeof u
       <audio src={message.media_url} controls className="max-w-60" />
       {/* Voice-note transcript (filled in by the webhook). */}
       {message.content_text && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-xs italic opacity-80">
+        <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-xs italic opacity-80">
           {message.content_text}
         </p>
       )}
@@ -245,7 +245,7 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
   switch (message.content_type) {
     case "text":
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
           {message.content_text}
         </p>
       );
@@ -259,7 +259,7 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
             <MediaUnavailable label={t("photo")} t={t} />
           )}
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
               {message.content_text}
             </p>
           )}
@@ -283,7 +283,7 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
             {t("template")}
           </span>
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
               {message.content_text}
             </p>
           )}
@@ -318,14 +318,14 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
               <CornerDownLeft className="h-3 w-3" />
               {t("buttonReply")}
             </span>
-            <p className="whitespace-pre-wrap break-words text-sm">
+            <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
               {message.content_text || t("interactiveReply")}
             </p>
           </div>
         );
       }
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
           {message.content_text || t("interactiveReply")}
         </p>
       );
@@ -333,7 +333,7 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
 
     default:
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
           {message.content_text || t("unsupported")}
         </p>
       );

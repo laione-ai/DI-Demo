@@ -38,6 +38,10 @@ export async function getAvailableSlots(
     throw new Error('Instructor not found');
   }
 
+  // Minimum notice: nothing bookable sooner than this from now.
+  const minNoticeHours = Number((instructor as Instructor).min_notice_hours ?? 0) || 0;
+  const earliestMs = Date.now() + minNoticeHours * 60 * 60 * 1000;
+
   // Load overrides for the date range
   const { data: overrides } = await db
     .from('instructor_availability')
@@ -115,6 +119,7 @@ export async function getAvailableSlots(
       durationMinutes,
       timezone,
       bookedSlots,
+      earliestMs,
     );
 
     days.push({ date: dateStr, day_name: dayName, slots });
@@ -135,12 +140,12 @@ function generateSlots(
   durationMinutes: number,
   timezone: string,
   bookedSlots: Array<{ start: number; end: number }>,
+  earliestMs: number = Date.now(),
 ): AvailableSlot[] {
   const slots: AvailableSlot[] = [];
 
   const startMinutes = timeToMinutes(dayStart);
   const endMinutes = timeToMinutes(dayEnd);
-  const now = Date.now();
 
   for (let m = startMinutes; m + durationMinutes <= endMinutes; m += durationMinutes) {
     const timeStr = minutesToTime(m);
@@ -161,8 +166,8 @@ function generateSlots(
     const slotStartMs = new Date(slotUtcStart).getTime();
     const slotEndMs = new Date(slotUtcEnd).getTime();
 
-    // Skip past slots
-    if (slotStartMs < now) {
+    // Skip past slots and anything inside the instructor's minimum notice
+    if (slotStartMs < earliestMs) {
       continue;
     }
 
@@ -229,4 +234,64 @@ export async function getNextAvailableDates(
   }
 
   return dates;
+}
+
+// -------------------------------------------------------
+// Server-side booking check
+// -------------------------------------------------------
+
+export type SlotCheck =
+  | { ok: true; startsAt: string }
+  | { ok: false; reason: string; date: string; openTimes: string[] };
+
+/**
+ * Is [startsAt, startsAt + durationMinutes) genuinely bookable for this
+ * instructor? It must line up with the instructor's slot grid, fall inside
+ * working hours (not a break or day off), respect minimum notice, and not
+ * overlap another lesson. Longer lessons need consecutive free slots.
+ *
+ * This is the server-side guard that stops the model booking a time it
+ * was never offered, whatever it sends.
+ */
+export async function checkSlotBookable(
+  db: SupabaseClient,
+  accountId: string,
+  instructorId: string,
+  startsAt: string | Date,
+  timezone: string = 'Europe/London',
+  slotMinutes: number = 60,
+  durationMinutes: number = slotMinutes,
+): Promise<SlotCheck> {
+  const startMs = new Date(startsAt).getTime();
+  if (Number.isNaN(startMs)) {
+    return { ok: false, reason: 'That date/time could not be understood.', date: '', openTimes: [] };
+  }
+
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(startMs));
+
+  const [day] = await getAvailableSlots(db, accountId, instructorId, date, date, timezone, slotMinutes);
+  const open = (day?.slots ?? []).filter((s) => s.available);
+  const openTimes = open.map((s) => s.time);
+  const openStarts = new Set(open.map((s) => new Date(s.datetime).getTime()));
+
+  const blocks = Math.max(1, Math.ceil(durationMinutes / slotMinutes));
+  for (let i = 0; i < blocks; i++) {
+    if (!openStarts.has(startMs + i * slotMinutes * 60 * 1000)) {
+      return {
+        ok: false,
+        reason: openTimes.length
+          ? `That time isn't open on ${date}.`
+          : `No open times on ${date}.`,
+        date,
+        openTimes,
+      };
+    }
+  }
+
+  return { ok: true, startsAt: new Date(startMs).toISOString() };
 }

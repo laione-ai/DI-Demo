@@ -34,10 +34,14 @@ How it is enforced:
 | Texting style | `agent/prompt.ts` | Tells the model how a person texts: one question, short, plain, honest if sincerely asked whether it's a bot |
 | Style guard | `agent/style.ts` | Runs on every reply: drops anything after the first question, strips markdown |
 | Language | `agent/prompt.ts`, migration `045` | Once the learner picks a language (`language_confirmed`), every reply is written in it |
+| Instructor lookup | `agent/tools.ts` `resolveInstructor` | Tools accept the instructor's id *or name*; the prompt lists ids. Fixes "Instructor not found" on follow-up turns |
+| Slot memory | `agent/availability-memory.ts` | Availability looked up in one turn is saved in the session and shown in later turns, so "Thursday at 10 please" books the exact slot |
+| Booking guard | `availability-service.ts` `checkSlotBookable` | `create_booking` / `reschedule_booking` only accept a genuinely open slot (hours, breaks, days off, other lessons, `min_notice_hours`); otherwise they return the real open times |
+| Plain date + time | `agent/tools.ts` `resolveStart` | The model books with `date` + `time` in UK time; the server converts to UTC (handles BST) |
 
 ## Demo instructor (Kevin)
 
-`supabase/seed/kevin_demo_instructor.sql` adds a test instructor, Kevin (manual + automatic, ADI-verified, all London), with 2 weeks of availability starting the day you run it: two days off, a short Saturday, afternoon-only and morning-only days, lunch breaks, a 3-hour block, and three already-booked evening slots. Run it in the Supabase SQL editor; it is safe to re-run and rebuilds from today each time. The agent's `get_instructor_availability` now defaults to the same 2-week window starting today.
+`supabase/seed/kevin_demo_instructor.sql` adds a test instructor, Kevin (manual + automatic, ADI-verified, all London), with a 2-hour minimum notice and a fixed pattern for this week and next (anchored to Monday): two days off, a short Saturday, afternoon-only and morning-only days, lunch breaks, a 3-hour block, and three already-booked evening slots. Run it in the Supabase SQL editor. Set `v_test_phone` to the number you test from. It's safe to re-run: Kevin is updated in place (never deleted, which would cascade-delete real bookings). The agent's `get_instructor_availability` now defaults to the same 2-week window starting today.
 
 ---
 

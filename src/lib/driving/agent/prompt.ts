@@ -7,10 +7,11 @@
 // rules, and the 5-lesson minimum prerequisite for test bookings.
 // ============================================================
 
-import type { DrivingSchoolConfig, Lesson, Instructor, Learner } from '../types';
+import type { DrivingSchoolConfig, Lesson, Instructor, Learner, LookedUpAvailability } from '../types';
 import { formatInSchoolTimezone } from '../config';
 import { REQUIRED_LESSONS_FOR_TEST } from './guards';
 import { formatIntakeSection, type IntakeProgress } from './intake-flow';
+import { formatLookedUpSection } from './availability-memory';
 
 interface PromptContext {
   config: DrivingSchoolConfig;
@@ -25,6 +26,8 @@ interface PromptContext {
   intake?: IntakeProgress;
   /** True when the learner's latest message is about a driving test / mock test. */
   testRequestDetected?: boolean;
+  /** Availability already looked up earlier in this session. */
+  lookedUpAvailability?: LookedUpAvailability[];
 }
 
 /**
@@ -42,6 +45,7 @@ export function buildDrivingAgentPrompt(ctx: PromptContext): string {
     completedLessonsCount = 0,
     intake,
     testRequestDetected = false,
+    lookedUpAvailability = [],
   } = ctx;
   const parts: string[] = [];
 
@@ -87,15 +91,27 @@ export function buildDrivingAgentPrompt(ctx: PromptContext): string {
     const instructorList = instructors
       .map(
         (i) =>
-          `- ${i.full_name} (${i.transmission_type || 'manual'} transmission)` +
+          `- ${i.full_name} (id ${i.id}; ${i.transmission_type || 'manual'} transmission)` +
           (i.service_areas && i.service_areas.length > 0
             ? ` — Service Areas: ${i.service_areas.join(', ')}`
             : '') +
           (i.badge_verified ? ' [DVSA Approved ADI]' : ''),
       )
       .join('\n');
-    parts.push(`Available Instructors:\n${instructorList}`);
+    parts.push(
+      `Instructors (always use these exact ids in tools):\n${instructorList}`,
+    );
+  } else {
+    parts.push(
+      `Instructors: none are set up yet. Don't offer times. Tell the learner the team will message them with some times shortly.`,
+    );
   }
+
+  const lookedUpSection = formatLookedUpSection(
+    lookedUpAvailability,
+    config.school_timezone || 'Europe/London',
+  );
+  if (lookedUpSection) parts.push(lookedUpSection);
 
   // -------------------------------------------------------
   // 4. Learner context
@@ -213,7 +229,9 @@ export function buildDrivingAgentPrompt(ctx: PromptContext): string {
     `- Call \`get_instructor_availability\` to get real, live available slots before proposing times.\n` +
     `- Call \`update_learner_profile\` whenever the learner shares their name, age, postcode, licence, experience, transmission, goal, or schedule preferences.\n` +
     `- Call \`check_test_eligibility\` whenever a learner mentions booking a driving test or mock test.\n` +
-    `- Call \`create_booking\` ONLY after the learner explicitly confirms their chosen slot time and instructor.\n` +
+    `- Call \`create_booking\` ONLY after the learner clearly picks a slot. Pass instructor_id, date (YYYY-MM-DD) and time (HH:MM, UK time) exactly as shown in the availability. Book it in the same turn they say yes; don't ask "shall I book it?" again.\n` +
+    `- If a tool returns an error, fix it yourself in the same turn (use the instructor id from the Instructors list, or one of the open times the error lists) and try again once. ` +
+    `Never ask the learner for permission to retry, and never say "that didn't go through, shall I try again?". If it still fails, offer them one of the real open times instead.\n` +
     `- When suggesting times, offer two or three good options in one natural sentence (e.g. "Kevin's free Friday at 3 or 4pm, or Saturday at 10 — any of those any good?"). Never paste a full list of slots. Prefer their preferred days/times.\n` +
     `- After a booking, cancellation or reschedule succeeds, reply with just a short friendly line (e.g. "Lovely, you're all booked in!"). ` +
     `Do NOT repeat the date, time or instructor — the system adds the exact details from the booking itself.\n` +

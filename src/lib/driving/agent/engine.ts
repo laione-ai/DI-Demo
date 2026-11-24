@@ -11,7 +11,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Lesson, Learner, AgentSession, DrivingSchoolConfig } from '../types';
+import type { Lesson, Learner, AgentSession, DrivingSchoolConfig, LookedUpAvailability } from '../types';
 import type {
   AgentContext,
   AgentTurnResult,
@@ -24,6 +24,7 @@ import { DRIVING_TOOLS, executeTool, type ToolExecutionContext } from './tools';
 import { buildDrivingAgentPrompt } from './prompt';
 import { getIntakeProgress, isPlaceholderName, type IntakeAskCounts } from './intake-flow';
 import { humanizeReply } from './style';
+import { rememberAvailability } from './availability-memory';
 import { mentionsDrivingTest } from './guards';
 import {
   loadActiveSession,
@@ -198,6 +199,10 @@ export async function runAgentTurn(
   const askedSoFar: IntakeAskCounts = (activeSession.slots?.intake_asked ?? {}) as IntakeAskCounts;
   // Latest known learner row; refreshed whenever the model saves new details.
   let currentLearner = learner as Learner | null;
+  // Availability already looked up in this session (survives across turns).
+  const lookedUp: Record<string, LookedUpAvailability> = {
+    ...((activeSession.slots?.looked_up ?? {}) as Record<string, LookedUpAvailability>),
+  };
 
   // Built from a learner snapshot so it can be rebuilt mid-turn, right after the
   // model saves new details — that is what moves the script on to the next step.
@@ -215,6 +220,7 @@ export async function runAgentTurn(
       completedLessonsCount,
       intake: getIntakeProgress(current, activeSession.turn_count, askedSoFar),
       testRequestDetected,
+      lookedUpAvailability: Object.values(lookedUp),
     });
   };
 
@@ -304,6 +310,11 @@ export async function runAgentTurn(
 
         if (toolCall.name === 'update_learner_profile') {
           profileChanged = true;
+        }
+
+        if (toolCall.name === 'get_instructor_availability') {
+          const remembered = rememberAvailability(toolResult.content);
+          if (remembered) lookedUp[remembered.instructor_id] = remembered;
         }
 
         llmMessages.push({
@@ -431,7 +442,7 @@ export async function runAgentTurn(
       messages: assistantMessages,
       turn_count: session.turn_count + 1,
       last_message_id: waMessageId,
-      slots: { ...activeSession.slots, llm_failures: 0, intake_asked: intakeAsked },
+      slots: { ...activeSession.slots, llm_failures: 0, intake_asked: intakeAsked, looked_up: lookedUp },
       state: lastMutationLesson
         ? 'completed'
         : session.state === 'awaiting_intent'

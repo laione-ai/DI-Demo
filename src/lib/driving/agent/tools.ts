@@ -24,9 +24,10 @@ import {
 import {
   getAvailableSlots,
   getNextAvailableDates,
+  checkSlotBookable,
 } from '../availability-service';
 import { commitReschedule } from '../reschedule';
-import { formatInSchoolTimezone, getDateInTimezone } from '../config';
+import { formatInSchoolTimezone, getDateInTimezone, schoolLocalToUtc } from '../config';
 import { REQUIRED_LESSONS_FOR_TEST, isTestBooking, wantsHuman } from './guards';
 
 /** Default availability window offered to learners: 2 weeks, starting today. */
@@ -56,7 +57,7 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
       properties: {
         instructor_id: {
           type: 'string',
-          description: "The instructor's ID",
+          description: "The instructor's id from the Instructors list (their name also works)",
         },
         from_date: {
           type: 'string',
@@ -147,10 +148,21 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        instructor_id: { type: 'string', description: "The instructor's ID" },
+        instructor_id: {
+          type: 'string',
+          description: "The instructor's id from the Instructors list (their name also works)",
+        },
+        date: {
+          type: 'string',
+          description: 'Lesson date YYYY-MM-DD, exactly as shown in the availability you looked up',
+        },
+        time: {
+          type: 'string',
+          description: 'Lesson start time HH:MM in UK time (24h), exactly as shown in the availability, e.g. "10:00"',
+        },
         starts_at: {
           type: 'string',
-          description: 'ISO 8601 UTC datetime of the slot',
+          description: 'Alternative to date + time: the exact ISO datetime from the availability result',
         },
         duration_minutes: {
           type: 'integer',
@@ -166,7 +178,7 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
           description: 'Optional notes or pickup location details',
         },
       },
-      required: ['instructor_id', 'starts_at'],
+      required: ['instructor_id'],
     },
   },
   {
@@ -193,16 +205,24 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
       type: 'object',
       properties: {
         lesson_id: { type: 'string', description: 'The lesson ID' },
+        new_date: {
+          type: 'string',
+          description: 'New date YYYY-MM-DD, exactly as shown in the availability you looked up',
+        },
+        new_time: {
+          type: 'string',
+          description: 'New start time HH:MM in UK time (24h), e.g. "14:00"',
+        },
         new_starts_at: {
           type: 'string',
-          description: 'ISO 8601 UTC datetime of the new slot',
+          description: 'Alternative to new_date + new_time: the exact ISO datetime from the availability result',
         },
         new_instructor_id: {
           type: 'string',
-          description: 'Optional: only if the learner wants to switch instructors',
+          description: 'Optional: only if the learner wants to switch instructors (id or name)',
         },
       },
-      required: ['lesson_id', 'new_starts_at'],
+      required: ['lesson_id'],
     },
   },
   {
@@ -236,6 +256,105 @@ export const DRIVING_TOOLS: ToolDefinition[] = [
     },
   },
 ];
+
+// -------------------------------------------------------
+// Helpers: instructor + time resolution
+// -------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type InstructorRef = { id: string; full_name: string };
+type ResolvedInstructor =
+  | { ok: true; instructor: InstructorRef }
+  | { ok: false; message: string };
+
+/**
+ * Turn whatever the model sent as an instructor reference into a real,
+ * active instructor of THIS school. Accepts the id, the full name, or a
+ * first name; with only one active instructor, a missing ref resolves to
+ * them. The model only sees tool results within a single turn, so on later
+ * turns it often has the name but not the id. Resolving here makes that harmless.
+ */
+export async function resolveInstructor(
+  db: SupabaseClient,
+  accountId: string,
+  ref: unknown,
+): Promise<ResolvedInstructor> {
+  const { data, error } = await db
+    .from('instructors')
+    .select('id, full_name')
+    .eq('account_id', accountId)
+    .eq('is_active', true);
+  if (error) throw error;
+  const all = (data ?? []) as InstructorRef[];
+
+  const valid = () =>
+    all.length
+      ? `Use one of: ${all.map((i) => `${i.full_name} (id ${i.id})`).join(', ')}.`
+      : 'No instructors are set up at this school.';
+
+  const raw = typeof ref === 'string' ? ref.trim() : '';
+  if (!raw) {
+    if (all.length === 1) return { ok: true, instructor: all[0] };
+    return { ok: false, message: `instructor_id is required. ${valid()}` };
+  }
+
+  if (UUID_RE.test(raw)) {
+    const byId = all.find((i) => i.id.toLowerCase() === raw.toLowerCase());
+    if (byId) return { ok: true, instructor: byId };
+  }
+
+  const norm = (v: string) => v.toLowerCase().replace(/[^a-z]/g, ' ').replace(/\s+/g, ' ').trim();
+  const want = norm(raw);
+  const matches =
+    [
+      all.filter((i) => norm(i.full_name) === want),
+      all.filter((i) => norm(i.full_name).split(' ')[0] === want.split(' ')[0]),
+      all.filter((i) => norm(i.full_name).includes(want) || want.includes(norm(i.full_name))),
+    ].find((m) => m.length > 0) ?? [];
+
+  if (matches.length === 1) return { ok: true, instructor: matches[0] };
+  return {
+    ok: false,
+    message: matches.length > 1
+      ? `"${raw}" matches more than one instructor. ${valid()}`
+      : `Unknown instructor "${raw}". ${valid()}`,
+  };
+}
+
+/**
+ * Work out the lesson start from date + time (school-local) or an ISO
+ * datetime. Local date + time is preferred: it means the model never has
+ * to do timezone or BST arithmetic itself.
+ */
+export function resolveStart(
+  date: unknown,
+  time: unknown,
+  iso: unknown,
+  tz: string,
+): string | null {
+  const d = typeof date === 'string' ? date.trim() : '';
+  const t = typeof time === 'string' ? time.trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d) && /^\d{1,2}:\d{2}/.test(t)) {
+    const [h, m] = t.split(':');
+    return schoolLocalToUtc(d, `${h.padStart(2, '0')}:${m.slice(0, 2)}`, tz);
+  }
+  if (typeof iso === 'string' && iso.trim()) {
+    const ms = new Date(iso.trim()).getTime();
+    return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+  }
+  return null;
+}
+
+function notBookableMessage(
+  name: string,
+  check: { reason: string; date: string; openTimes: string[] },
+): string {
+  const open = check.openTimes.length
+    ? ` ${name}'s open start times on ${check.date}: ${check.openTimes.join(', ')}.`
+    : ' Check get_instructor_availability for other days.';
+  return `Not booked: ${check.reason}${open} Offer the learner one of the real open times instead.`;
+}
 
 // -------------------------------------------------------
 // Tool execution context
@@ -318,6 +437,25 @@ export async function executeTool(
           }),
         );
 
+        if (annotated.length === 0) {
+          // Usually a setup problem (no instructor rows for this account, or all
+          // inactive) — make it loud in the server logs, and stop the model from
+          // telling the learner to "message again later".
+          console.warn('[driving agent] list_instructors: no active instructors for account', accountId);
+          return {
+            result: {
+              tool_call_id: toolCall.id,
+              name: toolCall.name,
+              content: JSON.stringify({
+                instructors: [],
+                note:
+                  'No instructors are set up right now. Do NOT ask the learner to message again later and do not invent slots. ' +
+                  'Say the team will check the diary and message them with some times shortly, then carry on with any intake questions still to ask.',
+              }),
+            },
+          };
+        }
+
         return {
           result: {
             tool_call_id: toolCall.id,
@@ -331,10 +469,9 @@ export async function executeTool(
       // get_instructor_availability
       // ====================================================
       case 'get_instructor_availability': {
-        const instructorId = args.instructor_id as string;
-        if (!instructorId) {
-          return errorResult(toolCall, 'instructor_id is required');
-        }
+        const resolved = await resolveInstructor(db, accountId, args.instructor_id);
+        if (!resolved.ok) return errorResult(toolCall, resolved.message);
+        const instructorId = resolved.instructor.id;
 
         // Default window: the next 2 weeks starting today (school timezone).
         // Slots earlier than "now" are dropped by the availability engine.
@@ -369,6 +506,7 @@ export async function executeTool(
             name: toolCall.name,
             content: JSON.stringify({
               instructor_id: instructorId,
+              instructor_name: resolved.instructor.full_name,
               from_date: fromDate,
               to_date: toDate,
               timezone: tz,
@@ -523,12 +661,10 @@ export async function executeTool(
       // create_booking
       // ====================================================
       case 'create_booking': {
-        const instructorId = args.instructor_id as string;
-        const startsAt = args.starts_at as string;
         const lessonType = (args.lesson_type as string) || 'standard';
-
-        if (!instructorId || !startsAt) {
-          return errorResult(toolCall, 'instructor_id and starts_at are required');
+        const startsAt = resolveStart(args.date, args.time, args.starts_at, tz);
+        if (!startsAt) {
+          return errorResult(toolCall, 'Give the lesson date (YYYY-MM-DD) and time (HH:MM, UK time) from the availability you looked up.');
         }
 
         if (!learnerId) {
@@ -548,12 +684,27 @@ export async function executeTool(
           }
         }
 
+        const resolved = await resolveInstructor(db, accountId, args.instructor_id);
+        if (!resolved.ok) return errorResult(toolCall, resolved.message);
+        const instructorId = resolved.instructor.id;
+        const slotMinutes = config.default_lesson_minutes || 60;
+        const durationMinutes = (args.duration_minutes as number) || slotMinutes;
+
+        // Only book times that are genuinely open (working hours, breaks,
+        // days off, minimum notice, other lessons), whatever the model sent.
+        const check = await checkSlotBookable(
+          db, accountId, instructorId, startsAt, tz, slotMinutes, durationMinutes,
+        );
+        if (!check.ok) {
+          return errorResult(toolCall, notBookableMessage(resolved.instructor.full_name, check));
+        }
+
         try {
           const lesson = await createLesson(db, accountId, userId, {
             learner_id: learnerId,
             instructor_id: instructorId,
-            starts_at: startsAt,
-            duration_minutes: (args.duration_minutes as number) || config.default_lesson_minutes || 60,
+            starts_at: check.startsAt,
+            duration_minutes: durationMinutes,
             lesson_type: lessonType,
             notes: args.notes as string | undefined,
           });
@@ -672,9 +823,9 @@ export async function executeTool(
       // ====================================================
       case 'reschedule_booking': {
         const lessonId = args.lesson_id as string;
-        const newStartsAt = args.new_starts_at as string;
+        const newStartsAt = resolveStart(args.new_date, args.new_time, args.new_starts_at, tz);
         if (!lessonId || !newStartsAt) {
-          return errorResult(toolCall, 'lesson_id and new_starts_at are required');
+          return errorResult(toolCall, 'lesson_id and the new date (YYYY-MM-DD) + time (HH:MM, UK time) are required');
         }
 
         const isOwner = await verifyLessonOwnership(db, accountId, lessonId, learnerId);
@@ -693,14 +844,37 @@ export async function executeTool(
           return errorResult(toolCall, 'Lesson not found.');
         }
 
+        let newInstructorId: string | undefined;
+        let targetName = (oldLesson as Lesson).instructor?.full_name ?? 'The instructor';
+        if (args.new_instructor_id) {
+          const resolved = await resolveInstructor(db, accountId, args.new_instructor_id);
+          if (!resolved.ok) return errorResult(toolCall, resolved.message);
+          newInstructorId = resolved.instructor.id;
+          targetName = resolved.instructor.full_name;
+        }
+
+        const slotMinutes = config.default_lesson_minutes || 60;
+        const check = await checkSlotBookable(
+          db,
+          accountId,
+          newInstructorId ?? (oldLesson as Lesson).instructor_id,
+          newStartsAt,
+          tz,
+          slotMinutes,
+          (oldLesson as Lesson).duration_minutes || slotMinutes,
+        );
+        if (!check.ok) {
+          return errorResult(toolCall, notBookableMessage(targetName, check));
+        }
+
         try {
           const { newLesson } = await commitReschedule({
             db,
             accountId,
             oldLesson: oldLesson as Lesson,
-            newStartsAt: new Date(newStartsAt),
+            newStartsAt: new Date(check.startsAt),
             config,
-            newInstructorId: args.new_instructor_id as string | undefined,
+            newInstructorId,
             actor: 'learner_via_agent',
             bookedVia: 'agent',
           });
